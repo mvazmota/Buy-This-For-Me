@@ -1,12 +1,21 @@
 {
   "name": "bifm-shopping-requests",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "Local-only prototype: browser extension + dashboard for family shopping requests",
+  "description": "Browser extension + dashboard for family shopping requests, local or on Cloudflare Workers",
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test test/api.test.js"
+    "test": "node --test test/api.test.js test/worker.test.js test/extension.test.js",
+    "check": "node --check src/worker.js && node --check src/session.js && node --check public/app.js && node --check extension/settings.js && node --check extension/popup.js && node --check extension/options.js",
+    "dev:worker": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:create": "wrangler d1 create buy-this-for-me",
+    "db:migrate:local": "wrangler d1 migrations apply buy-this-for-me --local",
+    "db:migrate:remote": "wrangler d1 migrations apply buy-this-for-me --remote"
+  },
+  "devDependencies": {
+    "wrangler": "^4.152.0"
   },
   "engines": {
     "node": ">=18"

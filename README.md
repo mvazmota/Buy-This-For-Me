@@ -1,30 +1,38 @@
-# BIFM shopping requests (local prototype)
+# BIFM shopping requests
 
 A small family shopping list that starts from the page you are viewing: an Edge extension
-sends the current tab's title and link to a dashboard running on your own PC.
+sends the current tab's title and link to a dashboard. The dashboard runs either on your own
+PC (local prototype) or on Cloudflare Workers with D1 storage and a shared app password.
 
-**This is a local-only prototype.** The server binds to `127.0.0.1` and has no login, no
-encryption, and no sync. Do **not** expose it to the internet (no port forwarding, tunnels,
-reverse proxies, or `0.0.0.0` binding). See [Security](#security-and-limitations).
-
-- No npm dependencies, no build step, no external services.
-- Data is a plain JSON file under `data/` on this computer only.
-- Tested with Node.js v24.21.0 on Windows 11; needs Node 18 or newer.
+- **Local mode:** `npm start`, no password, data in `data/requests.json`. Binds to `127.0.0.1`
+  only. Never expose it to the internet.
+- **Online mode:** Cloudflare Worker + D1 + static dashboard from `public/`, protected by the
+  `APP_PASSWORD` Worker secret. HTTPS only on `workers.dev`.
+- No accounts, no npm framework, no build step for the dashboard. Wrangler is the only
+  development dependency and is needed only for Cloudflare work.
+- Tested with Node.js v24.21.0 on Windows 11. The local server needs Node 18+; Wrangler
+  4.152 needs Node 22+.
 
 ## Contents
 
 ```text
-server.js              starts the local server on 127.0.0.1
-lib/app.js             HTTP routes, validation wiring, static dashboard files
-lib/validate.js        request/status validation rules
-lib/store.js           JSON storage with atomic, serialized writes
-public/                dashboard (plain HTML/CSS/JS)
-extension/             Manifest V3 extension for Edge (load this folder unpacked)
-test/api.test.js       API tests using node:test
-data/requests.json     created automatically on first save (ignored by git)
+server.js                    starts the local server on 127.0.0.1
+lib/app.js                   local HTTP routes, validation wiring, static dashboard files
+lib/validate.js              shared request/status validation rules
+lib/store.js                 local JSON storage with atomic, serialized writes
+src/worker.js                Cloudflare Worker API + static asset handler
+src/session.js               HMAC-signed session cookies (WebCrypto)
+src/package.json             marks src/ as ESM for Node syntax checks
+migrations/                  D1 migrations (apply with Wrangler)
+wrangler.jsonc               Worker, static assets, D1 and workers.dev config
+public/                      shared dashboard (plain HTML/CSS/JS)
+extension/                   Manifest V3 extension for Edge (load this folder unpacked)
+test/api.test.js             local API tests using node:test
+test/worker.test.js          Worker auth/API tests using a fake D1
+data/requests.json           created automatically on first local save (ignored by git)
 ```
 
-## 1. Start the server
+## 1. Start the local server
 
 1. Open **PowerShell**.
 2. Change to this project folder:
@@ -37,29 +45,26 @@ data/requests.json     created automatically on first save (ignored by git)
    ```
 4. You should see:
    ```text
-   BIFM shopping requests — local only
+   BIFM shopping requests - local only
    Dashboard:  http://127.0.0.1:3000
    Data file:  C:\Users\Martinho\Projects\BIFM\data\requests.json
    ```
 5. Open <http://127.0.0.1:3000> in Edge.
 
 Leave that PowerShell window open while you use the extension. Press `Ctrl+C` to stop.
-There is nothing to `npm install`; `npm test` and `npm start` use only Node built-ins.
+`npm start` and `npm test` use only Node built-ins. `npm install` is only needed for Wrangler
+and the Cloudflare steps.
 
-### Different port
+Local mode never asks for a password. The shared dashboard still calls `/api/session`,
+`/api/login` and `/api/logout`; against the local server those endpoints always report an
+authenticated session and login/logout succeed, so the old local workflow is unchanged.
 
-The extension defaults to port **3000**. If you must change it (for example the port is busy):
+### Different local port
 
-1. Start the server with a temporary environment variable:
-   ```powershell
-   $env:PORT=3001; npm start
-   ```
-2. Also update both places in the extension:
-   - `extension/popup.js` — `const SERVER_URL = 'http://127.0.0.1:3001';`
-   - `extension/manifest.json` — host permissions for `http://127.0.0.1:3001/*`
-3. Click the reload icon for the extension on `edge://extensions`.
-
-For this prototype, staying on 3000 is simpler.
+The extension defaults to port **3000** and only has host permission for port 3000. Staying on
+3000 is simplest. If you must change it, update the host permissions in
+`extension/manifest.json` to the new port and enter the matching URL in the extension
+settings. The local server binds to loopback only.
 
 ## 2. Load the extension in Edge
 
@@ -68,27 +73,49 @@ For this prototype, staying on 3000 is simpler.
 3. Click **Load unpacked**.
 4. Select the folder `C:\Users\Martinho\Projects\BIFM\extension` (the folder containing
    `manifest.json`, not the project root).
-5. The extension **BIFM Shopping Requests** appears. Click the puzzle-piece icon in the
-   toolbar and pin it if you want one-click access.
-6. Open a normal product page (`http://` or `https://`), click the extension icon.
-   The popup pre-fills the page title and link.
+5. The extension **BIFM Shopping Requests** appears. Pin it if you want one-click access.
+6. Open a normal product page (`http://` or `https://`), click the extension icon. The popup
+   pre-fills the page title and link.
 7. Edit the title if needed, set quantity (default 1), add an optional note, then click
    **Send request**.
-8. Open the dashboard at <http://127.0.0.1:3000> to see it at the top of the list.
+8. Open the dashboard to see it.
 
 After editing extension files, return to `edge://extensions` and click the extension's
 **Reload** icon. Reloading the extension also closes an open popup.
+
+### Extension backend settings
+
+Open the extension's **Settings** (extension options) from the popup footer or from
+`edge://extensions` → **Details** → **Extension options**.
+
+| Backend URL | Behaviour |
+| --- | --- |
+| `http://127.0.0.1:3000` (default) | Posts directly to the local server, as before. No password. |
+| `https://buy-this-for-me.<your-subdomain>.workers.dev` | Opens the online dashboard in a new foreground tab and hands over the request in the URL fragment. You log in on the dashboard if prompted; the request is submitted once after login. |
+
+Rules for the setting:
+
+- Use the dashboard **root** URL. No `/api`, query string, or `#fragment`.
+- A remote URL must use `https://`. Plain `http://` is accepted only for the local server.
+- Never enter a password in the extension. The app password is typed only on the dashboard and
+  is never stored by the extension.
+
+The fragment (`#draft=<encoded JSON>`) is not sent to the Cloudflare server; browsers keep
+fragments client-side. The dashboard removes it with `history.replaceState` only after a
+successful submit, so a refresh does not accidentally post the same item twice. If submission
+fails, the draft stays in the address and the dashboard offers an error message; refresh to
+retry.
 
 ### Permissions used
 
 | Permission | Why |
 | --- | --- |
-| `activeTab` | Read the active tab's title and URL only when you click the extension icon. No permanent access to browsing history. |
-| Host permissions for `http://127.0.0.1:3000/*` and `http://localhost:3000/*` | Allow the popup to call the local server. |
+| `activeTab` | Read the active tab's title and URL only when you click the extension icon. |
+| `storage` | Remember the dashboard URL chosen in the extension settings. |
+| Host permissions for `http://127.0.0.1:3000/*` and `http://localhost:3000/*` | Allow the popup to call the local server. Remote dashboards are opened as normal tabs, not fetched by the extension, so they need no host permission. |
 
-No other permissions, accounts, or remote URLs are used. If a browser-internal page
-(`edge://`, `chrome://`, extension pages) is active, its link is intentionally left blank
-because the server only accepts `http://` and `https://` links.
+If a browser-internal page (`edge://`, `chrome://`, extension pages) is active, its link is
+left blank because the API only accepts `http://` and `https://` links.
 
 ## 3. Using the dashboard
 
@@ -98,27 +125,38 @@ because the server only accepts `http://` and `https://` links.
 - Statuses save immediately: **New**, **Purchased**, **Done**, **Not buying**.
 - If an update fails, the menu reverts and an error banner explains why.
 - The page refreshes every 15 seconds and has a **Refresh** button.
-- An empty state appears when there are no requests.
+- Online, the dashboard asks for the app password. After login it uses a signed, HttpOnly,
+  Secure, SameSite=Lax cookie valid for 7 days. **Log out** clears it. If the session expires
+  while the page is open, the dashboard returns to the login view; an unsent extension draft
+  is kept and submitted after the next successful login.
+- Local mode hides **Log out** and never asks for a password.
 
-## 4. Data and backups
+## 4. Data and backups (local mode)
 
 - Storage file: `data\requests.json` (created on first successful submit).
 - Stop the server before copying or replacing the file to avoid reading a half-written state.
 - Back up by copying `data\requests.json` somewhere else.
-- To start over, stop the server, then rename or delete `data\requests.json`, and restart.
-- If the file contains invalid JSON, the server refuses to start and leaves the file
-  untouched. Fix or move it, then start again. Nothing is silently discarded.
+- To start over, stop the server, rename or delete `data\requests.json`, then restart.
+- If the file contains invalid JSON, the server refuses to start and leaves the file untouched.
+
+Online data lives in the Cloudflare D1 database. Use Wrangler (for example
+`npx wrangler d1 export buy-this-for-me --remote --output backup.sql`) if you need a copy.
+Changing the Worker or redeploying does not clear D1.
 
 ## 5. HTTP API
 
-All responses are JSON. Base URL is `http://127.0.0.1:3000`.
+All responses are JSON. Local base URL: `http://127.0.0.1:3000`. Online base URL: your Worker
+URL. Calls must be same-origin; cross-origin API requests are rejected by the Worker.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/health` | `{"ok":true}` liveness check |
-| `GET` | `/api/requests` | `{"requests":[...]}` newest first |
-| `POST` | `/api/requests` | Create a request |
-| `PATCH` | `/api/requests/:id` | Update only the status |
+| `GET` | `/api/health` | `{"ok":true}` liveness check (public) |
+| `GET` | `/api/session` | `{"authenticated":bool,"authRequired":bool}` |
+| `POST` | `/api/login` | Body `{"password":"..."}`; sets the session cookie online |
+| `POST` | `/api/logout` | Clears the session cookie online |
+| `GET` | `/api/requests` | `{"requests":[...]}` newest first (online: login required) |
+| `POST` | `/api/requests` | Create a request (online: login required) |
+| `PATCH` | `/api/requests/:id` | Update only the status (online: login required) |
 
 Create body:
 
@@ -136,7 +174,7 @@ Rules: `title` required, 1–200 characters after trimming; `url` required and m
 optional whole number 1–999 (default 1). Status updates accept exactly one of the four
 statuses.
 
-Validation failures return `400` with a message and field details, for example:
+Validation failures return `400` with a message and field details:
 
 ```json
 {
@@ -145,53 +183,216 @@ Validation failures return `400` with a message and field details, for example:
 }
 ```
 
-Other errors: `404` unknown request/route, `405` wrong method, `413` body over 64 KB,
-`500` unexpected server error (details in the server console). A request defaults to status
-`New` and records `submittedAt` and `updatedAt` as ISO timestamps.
+Other errors: `401` login required or bad credentials, `403` cross-origin API call, `404`
+unknown request/route, `405` wrong method, `413` body over 64 KB, `500` unexpected server
+error (generic message). A request defaults to status `New` and records `submittedAt` and
+`updatedAt` as ISO timestamps.
 
-## 6. Tests
+Online, `/api/requests` and `/api/requests/:id` return `401` until the login cookie is valid.
+Login errors are deliberately generic and never reveal the configured password.
+
+## 6. Tests and syntax checks
 
 ```powershell
 npm test
+npm run check
 ```
 
-Uses `node:test` against a temporary data file and an ephemeral loopback port; it does not
-touch `data/requests.json`. Expected: 11 tests passing (create, list order, persistence
-across restart, validation, status updates, malformed/oversized bodies, routing errors,
-static serving, path-traversal block).
+`npm test` runs local API tests and Worker auth/API tests. The Worker tests use a fake D1
+binding, not a live Cloudflare account. `npm run check` runs `node --check` over the Worker,
+session helper, dashboard script and extension scripts.
 
-There is no build step. Optional syntax check for the popup script:
+Optional: bundle the Worker without deploying (validates Wrangler config and imports):
 
 ```powershell
-node --check extension/popup.js
+npx wrangler deploy --dry-run
 ```
 
-## Security and limitations
+## 7. Deploy to Cloudflare Workers
 
-- **Do not expose this to the internet.** The server has no authentication or authorization,
-  and runs plain HTTP. Loopback binding keeps it on this PC but does not protect it from
-  other software or users on the same machine.
-- **Not synced.** Data lives only in this folder on this PC. Family members on other devices
-  cannot use it yet; a future version needs hosting, accounts, and transport security first.
-- The extension can only talk to the two loopback host permissions listed above while the
-  server is running.
-- No editing or deleting of existing requests, no item categories, no per-person attribution,
-  no purchase dates. A request can be submitted repeatedly by accident.
-- The dashboard trusts whatever is in the local JSON file and only renders `http(s)` links;
-  titles and notes are inserted as text, not HTML.
-- The JSON store is adequate for a household-sized list. It is not transactional across
-  processes; run a single server instance.
-- Edge's popup closes when it loses focus, so an in-flight submit may be cut off if you click
-  away. Reopen it and check the dashboard if unsure.
+This repository is configured for a Worker named `buy-this-for-me`. The Worker handles
+`/api/*` first, stores requests in D1, and serves the existing dashboard files from `public/`
+through the `ASSETS` binding. `workers.dev` is enabled.
 
-## Troubleshooting
+Nothing in this section has been run against a Cloudflare account here. You must supply the
+account, database id and app password.
+
+### 7.1 Requirements
+
+1. A Cloudflare account (the free plan is enough for this prototype).
+2. Node.js 22 or newer (the Wrangler 4.152 requirement) and npm. If Cloudflare Workers
+   Builds uses an older default, set the `NODE_VERSION` environment variable to `22` in the
+   build settings.
+3. This project installed locally:
+   ```powershell
+   npm install
+   npx wrangler --version
+   ```
+4. Wrangler login for the first manual deploy:
+   ```powershell
+   npx wrangler login
+   ```
+
+### 7.2 Create the D1 database
+
+1. Create the database:
+   ```powershell
+   npx wrangler d1 create buy-this-for-me
+   ```
+2. Copy the printed `database_id` (a UUID).
+3. Open `wrangler.jsonc` and replace the placeholder:
+   ```jsonc
+   "database_id": "00000000-0000-0000-0000-000000000000"
+   ```
+   with the real id. Keep the binding name `DB`, the database name `buy-this-for-me`, and
+   `migrations_dir` unchanged.
+4. The placeholder is intentionally invalid so a deploy cannot silently target the wrong
+   database.
+
+### 7.3 Apply the D1 migration
+
+Apply the schema to the remote database before the first request:
+
+```powershell
+npx wrangler d1 migrations apply buy-this-for-me --remote
+```
+
+For local Worker development, apply to the local D1 copy instead:
+
+```powershell
+npx wrangler d1 migrations apply buy-this-for-me --local
+```
+
+`migrations/0001_create_requests.sql` creates the `requests` table and an index; it is
+idempotent (`IF NOT EXISTS`). When you add a new migration file, apply it with the same
+`--remote` command before deploying code that needs it.
+
+### 7.4 First deploy with Wrangler
+
+```powershell
+npx wrangler deploy
+```
+
+The command prints the deployed URL, typically
+`https://buy-this-for-me.<your-subdomain>.workers.dev`. The Worker now exists, but login is
+still unavailable until the secret is set in step 7.5.
+
+If Wrangler complains that the database id is invalid, the placeholder in `wrangler.jsonc` was
+not replaced.
+
+### 7.5 Set the app password secret
+
+Generate a long random password, then store it **only** as a Worker secret:
+
+```powershell
+node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"
+npx wrangler secret put APP_PASSWORD
+```
+
+Paste the password when prompted. It is stored encrypted by Cloudflare and is not written to
+this repository. Do not put it in `wrangler.jsonc`, `.dev.vars`, a build command, or the
+extension. `wrangler secret put` needs the Worker to exist, which is why the first deploy comes
+first. To rotate the password later, run the command again; this invalidates existing session
+cookies.
+
+Open the deployed URL, log in with the password, and add a test request. Then set that root
+URL in the extension settings (section 2) and test the online handoff. If login returns "Login
+is not available", the `APP_PASSWORD` secret is missing for that Worker.
+
+### 7.6 Connect Cloudflare Workers Builds to GitHub
+
+The repository for this project is `mvazmota/Buy-This-For-Me`, production branch `main`.
+
+Workers Builds connects Git to a Worker that already exists; it does not create the first
+deployment. Finish steps 7.2–7.5 before connecting anything: create the D1 database
+(`npx wrangler d1 create buy-this-for-me`), replace the placeholder `database_id` in
+`wrangler.jsonc` with the real id, apply the migration with
+`npx wrangler d1 migrations apply buy-this-for-me --remote`, deploy once with
+`npx wrangler deploy`, and set the `APP_PASSWORD` secret. Connecting Builds afterwards only
+automates deploys of later commits.
+
+1. Commit and push the project to GitHub. The real D1 id from step 7.2 and the new files must
+   be committed; the password must not be committed.
+2. In the Cloudflare dashboard open **Workers & Pages** and select the Worker you already
+   deployed in step 7.4. Do not create a new Worker or import the repository as a new project.
+3. Open **Settings** → **Builds** → **Connect**.
+4. If prompted, authorize the Cloudflare GitHub App and grant it access to
+   `mvazmota/Buy-This-For-Me`.
+5. Select the repository `mvazmota/Buy-This-For-Me`.
+6. Set **Production branch** to `main`.
+7. Set the **build command** to:
+   ```text
+   npm ci && npm test && npm run check
+   ```
+8. Set the **deploy command** to:
+   ```text
+   npx wrangler deploy
+   ```
+9. Save. Cloudflare installs from `package-lock.json`, runs the tests and syntax checks, then
+   deploys the Worker.
+10. Make sure `APP_PASSWORD` exists on the Worker (step 7.5). Worker secrets are runtime
+    configuration and are not committed or created by the build.
+
+Connecting Builds does not change the running Worker; it enables deployments on future work.
+From then on every push to `main` runs the build and deploy commands, so you no longer deploy
+by hand. Builds never applies D1 migrations: run the `--remote` migration from step 7.3
+yourself before pushing code that needs a new one.
+
+### 7.7 Verify the deployment
+
+1. `GET https://<worker>/api/health` in a browser or with curl should return `{"ok":true}`.
+2. Open `https://<worker>/` in a private window. You should see the login form, not the list.
+3. Log in with `APP_PASSWORD`. The dashboard should load (empty at first).
+4. Add a request from the dashboard's API or the extension and confirm it appears after a
+   refresh and after a Worker redeploy (it lives in D1).
+5. Log out and confirm the list is no longer shown.
+6. Wrong passwords must show a generic failure, never the configured password.
+
+### 7.8 Point the extension at the Worker
+
+1. Open the extension settings.
+2. Enter the Worker root URL, e.g. `https://buy-this-for-me.<your-subdomain>.workers.dev`.
+3. Save, then submit a request from a product page.
+4. A new dashboard tab opens in the foreground with the draft. Log in if prompted; the
+   request submits once and the fragment is cleared. A refresh afterwards must not post it
+   again.
+
+Do not configure the extension with the local `http://127.0.0.1:3000` URL while expecting it
+to reach the online Worker. Local URLs always use the direct local POST path.
+
+## 8. Security and limitations
+
+- **Local mode must stay local.** It has no authentication, uses plain HTTP, and binds to
+  `127.0.0.1`. Do not port-forward it, tunnel it, reverse-proxy it, or bind it to `0.0.0.0`.
+- **Online mode uses one shared password.** Everyone with the password sees and can change
+  every request. There are no individual accounts, audit trails, or per-person permissions.
+- The session cookie is HMAC-signed with a key derived from `APP_PASSWORD`, is HttpOnly,
+  Secure and SameSite=Lax, and expires after 7 days. Logging out clears it; rotating the
+  secret invalidates all sessions.
+- The API rejects cross-origin calls and returns generic login/internal errors. No CORS
+  headers are added. Request bodies are capped at 64 KB.
+- The password is a Cloudflare Worker secret. It is never stored in the extension, the
+  dashboard, or git. Do not reuse an important password.
+- There is no rate limiting on login. Choose a long random password.
+- No editing or deleting of existing requests, no categories, no purchase dates. A request can
+  be submitted twice if you send it twice. The extension's remote handoff avoids automatic
+  replay after a successful submit, but a failed response can still lead to a retry.
+- The dashboard renders `http(s)` links only; titles and notes are inserted as text, not HTML.
+- D1 is eventually consistent across Cloudflare locations; the dashboard's 15-second refresh
+  is usually enough for a household list.
+
+## 9. Troubleshooting
 
 | Symptom | Fix |
 | --- | --- |
-| Popup says it cannot reach `http://127.0.0.1:3000` | Start the server (`npm start`) and keep that window open. |
-| `Port 3000 is already in use` | Stop the other process, or use the different-port steps above. |
-| Dashboard shows "Could not load requests" | Same cause: server stopped or wrong port. Start it, then press Refresh. |
-| Title/link not pre-filled | Click the icon while on a normal `http(s)` page. Reload the extension after file edits. |
-| Extension missing or shows errors on `edge://extensions` | Confirm you loaded the `extension` folder itself and that `manifest.json` is directly inside it. |
-| Server refuses to start and mentions invalid JSON | `data\requests.json` is malformed. Move it aside, then restart. |
+| Popup says it cannot reach `http://127.0.0.1:3000` | Start the local server (`npm start`) and keep that window open. |
+| `Port 3000 is already in use` | Stop the other process. The extension only supports port 3000 without a manifest change. |
+| Dashboard shows "Could not load requests" | Local: server stopped or wrong port. Online: check the Worker URL and login. Press Refresh. |
+| Online dashboard shows the login form after working | The 7-day session expired or the secret was rotated. Log in again. |
+| Login says "Login is not available" | The Worker has no `APP_PASSWORD` secret. Run `npx wrangler secret put APP_PASSWORD`. |
+| `wrangler deploy` rejects the database id | Replace the all-zero placeholder in `wrangler.jsonc` with the id from `wrangler d1 create`. |
+| Remote extension submit opens a blank/404 tab | Use the Worker **root** URL in extension settings, with `https://` and no path. |
+| Extension draft is not submitted automatically | Log in on the dashboard tab. The draft is kept in the URL fragment until a successful submit. |
+| Title/link not pre-filled | Click the icon on a normal `http(s)` page. Reload the extension after file edits. |
 | Changes not visible | Reload the extension in `edge://extensions`; refresh the dashboard. |
+| Server refuses to start and mentions invalid JSON | `data\requests.json` is malformed. Move it aside, then restart. |

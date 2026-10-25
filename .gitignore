@@ -1,3 +1,6 @@
 node_modules/
 data/
 *.tmp
+.wrangler/
+.wrangler-dry-run/
+.dev.vars

@@ -111,6 +111,94 @@ textarea {
   color: var(--ok);
 }
 
+.banner[data-kind="info"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.login-card {
+  max-width: 420px;
+  margin: 24px auto 0;
+  padding: 24px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.login-card h2 {
+  margin: 0 0 6px;
+  font-size: 20px;
+}
+
+.login-card p {
+  margin: 0 0 14px;
+}
+
+.login-card label {
+  display: block;
+  margin-bottom: 6px;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.login-card input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 11px;
+  background: var(--card);
+  color: var(--text);
+}
+
+.login-card input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.login-error {
+  margin: 8px 0 0;
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.button-primary {
+  width: 100%;
+  margin-top: 14px;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.button-primary:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: #17496b;
+  color: #ffffff;
+}
+
+.draft-status {
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 14px;
+}
+
+.draft-status[data-kind="success"] {
+  border-color: var(--ok);
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.draft-status[data-kind="error"] {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
 .summary {
   margin: 0 0 12px;
   color: var(--muted);

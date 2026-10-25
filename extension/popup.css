@@ -145,3 +145,7 @@ footer {
 footer a {
   color: var(--accent);
 }
+
+.footer-sep {
+  color: var(--border);
+}

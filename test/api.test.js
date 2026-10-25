@@ -224,6 +224,35 @@ test('unknown API routes and wrong methods return JSON errors', async () => {
   });
 });
 
+test('local session endpoints keep the dashboard password-free', async () => {
+  await withServer(async ({ base }) => {
+    const session = await fetch(`${base}/api/session`);
+    assert.equal(session.status, 200);
+    assert.deepEqual(await session.json(), { authenticated: true, authRequired: false });
+
+    const login = await fetch(`${base}/api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: 'anything' }),
+    });
+    assert.equal(login.status, 200);
+    assert.deepEqual(await login.json(), { authenticated: true, authRequired: false });
+
+    const logout = await fetch(`${base}/api/logout`, { method: 'POST' });
+    assert.equal(logout.status, 200);
+    assert.deepEqual(await logout.json(), { authenticated: true, authRequired: false });
+  });
+});
+
+test('session endpoints reject wrong methods', async () => {
+  await withServer(async ({ base }) => {
+    for (const pathname of ['/api/session', '/api/login', '/api/logout']) {
+      const response = await fetch(`${base}${pathname}`, { method: 'DELETE' });
+      assert.equal(response.status, 405, `${pathname} should reject DELETE`);
+    }
+  });
+});
+
 test('dashboard is served and path traversal is blocked', async () => {
   await withServer(async ({ base }) => {
     const index = await fetch(`${base}/`);

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BIFM settings</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main>
+      <h1>BIFM settings</h1>
+      <p class="intro">
+        Choose which dashboard receives shopping requests. The default is your computer; enter a
+        Cloudflare Worker URL to use the online dashboard from any device.
+      </p>
+
+      <form id="settings-form" novalidate>
+        <label for="backend-url">Dashboard URL</label>
+        <input
+          id="backend-url"
+          name="backend-url"
+          type="url"
+          spellcheck="false"
+          autocomplete="off"
+          placeholder="http://127.0.0.1:3000"
+          required
+        />
+        <p id="backend-error" class="field-error" role="alert" hidden></p>
+
+        <button id="save" type="submit">Save</button>
+        <p id="status" class="status" role="status" hidden></p>
+      </form>
+
+      <section class="notes">
+        <h2>Online dashboard</h2>
+        <p>
+          Use the root URL of your Worker, for example
+          <code>https://buy-this-for-me.your-name.workers.dev</code>. Do not add <code>/api</code>,
+          a query string, or a password.
+        </p>
+        <p>
+          When the configured URL is remote, the extension opens the dashboard in a new tab and
+          hands the request over in the URL fragment. Log in on the dashboard when prompted; the
+          request is submitted once after login. The extension never stores the app password.
+        </p>
+
+        <h2>Local server</h2>
+        <p>
+          Keep <code>http://127.0.0.1:3000</code> to post directly to the local server started with
+          <code>npm start</code>. Local mode does not ask for a password.
+        </p>
+      </section>
+    </main>
+
+    <script src="settings.js"></script>
+    <script src="options.js"></script>
+  </body>
+</html>

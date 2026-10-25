@@ -1,0 +1,30 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "buy-this-for-me",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-10-25",
+  // Serve static dashboard files from public/.
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    // Make sure /api/* always reaches the Worker instead of the asset handler.
+    "run_worker_first": ["/api/*"]
+  },
+  // Workers.dev is enabled by default; keep it explicit.
+  "workers_dev": true,
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "buy-this-for-me",
+      // Replace this placeholder with the id printed by:
+      //   npx wrangler d1 create buy-this-for-me
+      // Cloudflare will reject this placeholder, which is intentional: it
+      // prevents accidentally deploying against the wrong database.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

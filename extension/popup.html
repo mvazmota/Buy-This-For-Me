@@ -10,6 +10,7 @@
     <header>
       <h1>Add shopping request</h1>
       <p id="page-hint" class="hint" hidden></p>
+      <p id="backend-hint" class="hint" hidden></p>
     </header>
 
     <form id="request-form" novalidate>
@@ -35,12 +36,15 @@
     </form>
 
     <footer>
-      Local server:
+      <span>Dashboard:</span>
       <a id="dashboard-link" href="http://127.0.0.1:3000/" target="_blank" rel="noopener noreferrer">
         http://127.0.0.1:3000
       </a>
+      <span class="footer-sep">·</span>
+      <a id="options-link" href="#">Settings</a>
     </footer>
 
+    <script src="settings.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

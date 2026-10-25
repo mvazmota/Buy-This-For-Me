@@ -10,27 +10,46 @@
     <header class="page-header">
       <div>
         <h1>Shopping requests</h1>
-        <p class="subtitle">Local only — stored on this computer</p>
+        <p class="subtitle">Family shopping list</p>
       </div>
       <div class="header-actions">
         <span id="last-updated" class="muted" aria-live="polite"></span>
-        <button id="refresh" type="button" class="button">Refresh</button>
+        <button id="refresh" type="button" class="button" hidden>Refresh</button>
+        <button id="logout" type="button" class="button" hidden>Log out</button>
       </div>
     </header>
 
     <div id="banner" class="banner" role="alert" hidden></div>
 
-    <main>
+    <section id="login-view" class="login-card" hidden>
+      <h2>Log in</h2>
+      <p class="muted">Enter the app password to view and change shopping requests.</p>
+      <form id="login-form" novalidate>
+        <label for="password">App password</label>
+        <input
+          id="password"
+          name="password"
+          type="password"
+          autocomplete="current-password"
+          required
+        />
+        <p id="login-error" class="login-error" role="alert" hidden></p>
+        <button id="login-submit" type="submit" class="button button-primary">Log in</button>
+      </form>
+    </section>
+
+    <main id="app-view" hidden>
+      <p id="draft-status" class="draft-status" role="status" hidden></p>
       <p id="summary" class="summary" hidden></p>
       <div id="list" class="request-list" aria-live="polite"></div>
       <p id="empty" class="empty" hidden>
-        No requests yet. Click the extension icon in Edge while viewing a product page to add one.
+        No requests yet. Open a product page and use the extension to add one.
       </p>
       <p id="loading" class="muted">Loading requests…</p>
     </main>
 
     <footer class="footer">
-      <p>Status changes save immediately. This prototype is not synced to other devices.</p>
+      <p>Status changes save immediately.</p>
     </footer>
 
     <script src="/app.js"></script>

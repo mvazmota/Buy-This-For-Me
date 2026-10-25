@@ -1,6 +1,6 @@
 'use strict';
 
-const SERVER_URL = 'http://127.0.0.1:3000';
+let backendUrl = DEFAULT_BACKEND_URL;
 
 const form = document.getElementById('request-form');
 const titleInput = document.getElementById('title');
@@ -10,7 +10,9 @@ const urlInput = document.getElementById('url');
 const submitButton = document.getElementById('submit');
 const statusEl = document.getElementById('status');
 const pageHint = document.getElementById('page-hint');
+const backendHint = document.getElementById('backend-hint');
 const dashboardLink = document.getElementById('dashboard-link');
+const optionsLink = document.getElementById('options-link');
 
 const fieldErrors = {
   title: document.getElementById('title-error'),
@@ -18,9 +20,6 @@ const fieldErrors = {
   note: document.getElementById('note-error'),
   url: document.getElementById('url-error'),
 };
-
-dashboardLink.href = `${SERVER_URL}/`;
-dashboardLink.textContent = SERVER_URL;
 
 function showStatus(message, kind = 'error') {
   statusEl.replaceChildren();
@@ -30,7 +29,7 @@ function showStatus(message, kind = 'error') {
     const text = document.createElement('span');
     text.textContent = `${message} `;
     const link = document.createElement('a');
-    link.href = `${SERVER_URL}/`;
+    link.href = `${backendUrl}/`;
     link.target = '_blank';
     link.rel = 'noopener noreferrer';
     link.textContent = 'Open dashboard';
@@ -119,6 +118,21 @@ function validate() {
   return { title, url, note, quantity };
 }
 
+async function applyBackend() {
+  backendUrl = await getBackendUrl();
+  dashboardLink.href = `${backendUrl}/`;
+  dashboardLink.textContent = backendUrl;
+
+  if (isLocalBackend(backendUrl)) {
+    backendHint.hidden = true;
+    backendHint.textContent = '';
+  } else {
+    backendHint.textContent =
+      'Online dashboard: a new tab opens after you submit. Log in there if prompted; the request is sent once.';
+    backendHint.hidden = false;
+  }
+}
+
 async function prefillFromActiveTab() {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -145,19 +159,14 @@ async function prefillFromActiveTab() {
   }
 }
 
-async function submitRequest(event) {
-  event.preventDefault();
-  clearStatus();
-  clearFieldErrors();
+function resetFormAfterSuccess() {
+  form.reset();
+  quantityInput.value = '1';
+}
 
-  const payload = validate();
-  if (!payload) return;
-
-  submitButton.disabled = true;
-  submitButton.textContent = 'Sending…';
-
+async function sendToLocal(payload) {
   try {
-    const response = await fetch(`${SERVER_URL}/api/requests`, {
+    const response = await fetch(`${backendUrl}/api/requests`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -172,26 +181,72 @@ async function submitRequest(event) {
       } else {
         showStatus(data.error || `Server returned ${response.status}.`, 'error');
       }
-      return;
+      return false;
     }
 
-    form.reset();
-    quantityInput.value = '1';
+    resetFormAfterSuccess();
     showStatus(`Sent “${data.request.title}”.`, 'success');
-    await prefillFromActiveTab();
+    return true;
   } catch (err) {
     const unreachable = err instanceof TypeError;
     showStatus(
       unreachable
-        ? `Cannot reach the local server at ${SERVER_URL}. Start it with "npm start" in the project folder, then try again.`
+        ? `Cannot reach the local server at ${backendUrl}. Start it with "npm start" in the project folder, then try again.`
         : `Could not send the request: ${err.message}`,
       'error'
     );
+    return false;
+  }
+}
+
+async function openRemoteDraft(payload) {
+  // The remote Worker requires a login. Hand the request to the dashboard in
+  // the URL fragment so it can submit after login, same-origin.
+  const draftUrl = `${backendUrl}/#draft=${encodeURIComponent(JSON.stringify(payload))}`;
+  try {
+    // Log in happens on the dashboard, so bring the tab to the foreground.
+    await chrome.tabs.create({ url: draftUrl, active: true });
+    resetFormAfterSuccess();
+    showStatus(
+      'Opened the online dashboard in a new tab. Log in there if prompted; the request will be submitted once.',
+      'success'
+    );
+    return true;
+  } catch (err) {
+    showStatus(`Could not open the dashboard tab: ${err.message}`, 'error');
+    return false;
+  }
+}
+
+async function submitRequest(event) {
+  event.preventDefault();
+  clearStatus();
+  clearFieldErrors();
+
+  const payload = validate();
+  if (!payload) return;
+
+  submitButton.disabled = true;
+  submitButton.textContent = 'Sending…';
+
+  try {
+    await backendReady;
+    const ok = isLocalBackend(backendUrl)
+      ? await sendToLocal(payload)
+      : await openRemoteDraft(payload);
+    if (ok) await prefillFromActiveTab();
   } finally {
     submitButton.disabled = false;
     submitButton.textContent = 'Send request';
   }
 }
 
+const backendReady = applyBackend();
+
 form.addEventListener('submit', submitRequest);
-prefillFromActiveTab();
+optionsLink.addEventListener('click', (event) => {
+  event.preventDefault();
+  chrome.runtime.openOptionsPage();
+});
+
+backendReady.then(prefillFromActiveTab);
