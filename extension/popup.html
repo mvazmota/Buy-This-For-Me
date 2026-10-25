@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Add shopping request</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Add shopping request</h1>
+      <p id="page-hint" class="hint" hidden></p>
+    </header>
+
+    <form id="request-form" novalidate>
+      <label for="title">Title</label>
+      <input id="title" name="title" type="text" maxlength="200" autocomplete="off" required />
+      <p id="title-error" class="field-error" hidden></p>
+
+      <label for="quantity">Quantity</label>
+      <input id="quantity" name="quantity" type="number" min="1" max="999" step="1" value="1" required />
+      <p id="quantity-error" class="field-error" hidden></p>
+
+      <label for="note">Note <span class="optional">(optional)</span></label>
+      <textarea id="note" name="note" rows="3" maxlength="1000" placeholder="Size, colour, brand, where to buy…"></textarea>
+      <p id="note-error" class="field-error" hidden></p>
+
+      <label for="url">Link</label>
+      <input id="url" name="url" type="url" maxlength="2048" autocomplete="off" required />
+      <p id="url-error" class="field-error" hidden></p>
+
+      <button id="submit" type="submit">Send request</button>
+
+      <p id="status" class="status" role="status" hidden></p>
+    </form>
+
+    <footer>
+      Local server:
+      <a id="dashboard-link" href="http://127.0.0.1:3000/" target="_blank" rel="noopener noreferrer">
+        http://127.0.0.1:3000
+      </a>
+    </footer>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

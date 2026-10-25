@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Shopping requests</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="page-header">
+      <div>
+        <h1>Shopping requests</h1>
+        <p class="subtitle">Local only — stored on this computer</p>
+      </div>
+      <div class="header-actions">
+        <span id="last-updated" class="muted" aria-live="polite"></span>
+        <button id="refresh" type="button" class="button">Refresh</button>
+      </div>
+    </header>
+
+    <div id="banner" class="banner" role="alert" hidden></div>
+
+    <main>
+      <p id="summary" class="summary" hidden></p>
+      <div id="list" class="request-list" aria-live="polite"></div>
+      <p id="empty" class="empty" hidden>
+        No requests yet. Click the extension icon in Edge while viewing a product page to add one.
+      </p>
+      <p id="loading" class="muted">Loading requests…</p>
+    </main>
+
+    <footer class="footer">
+      <p>Status changes save immediately. This prototype is not synced to other devices.</p>
+    </footer>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

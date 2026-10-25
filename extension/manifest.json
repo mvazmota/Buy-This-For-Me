@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "BIFM Shopping Requests",
+  "version": "0.1.0",
+  "description": "Send the current tab to your local shopping-request dashboard.",
+  "action": {
+    "default_title": "Add to shopping requests",
+    "default_popup": "popup.html"
+  },
+  "permissions": ["activeTab"],
+  "host_permissions": ["http://127.0.0.1:3000/*", "http://localhost:3000/*"]
+}

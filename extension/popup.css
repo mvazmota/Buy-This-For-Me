@@ -1,0 +1,147 @@
+:root {
+  color-scheme: light;
+  --text: #1c2430;
+  --muted: #5d6b7a;
+  --border: #cfd6de;
+  --accent: #1f5f8b;
+  --accent-hover: #17496b;
+  --danger: #a3261f;
+  --ok: #1f6b45;
+  --ok-soft: #e8f4ed;
+  --warn-soft: #fdf1dc;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  width: 340px;
+  margin: 0;
+  padding: 14px;
+  color: var(--text);
+  background: #ffffff;
+  font: 13px/1.45 "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+}
+
+h1 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.hint {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--warn-soft);
+  color: #6b4200;
+  font-size: 12px;
+}
+
+form {
+  margin-top: 12px;
+}
+
+label {
+  display: block;
+  margin: 10px 0 4px;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.optional {
+  font-weight: 400;
+  color: var(--muted);
+}
+
+input,
+textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 9px;
+  font: inherit;
+  color: inherit;
+  background: #fff;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 56px;
+}
+
+input:focus,
+textarea:focus,
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+input[aria-invalid="true"],
+textarea[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+button {
+  width: 100%;
+  margin-top: 14px;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+button:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+
+.field-error {
+  margin: 4px 0 0;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.status {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  white-space: pre-line;
+}
+
+.status[data-kind="success"] {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.status[data-kind="error"] {
+  background: #fdecea;
+  color: var(--danger);
+}
+
+.status a {
+  color: inherit;
+  font-weight: 600;
+}
+
+footer {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid #eef1f4;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+footer a {
+  color: var(--accent);
+}
