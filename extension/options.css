@@ -61,6 +61,10 @@ label {
   font-size: 14px;
 }
 
+form label ~ label {
+  margin-top: 16px;
+}
+
 input {
   width: 100%;
   padding: 9px 11px;
@@ -105,6 +109,12 @@ button:disabled {
 .field-error {
   margin: 6px 0 0;
   color: var(--danger);
+  font-size: 13px;
+}
+
+.field-note {
+  margin: 6px 0 0;
+  color: var(--muted);
   font-size: 13px;
 }
 

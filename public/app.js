@@ -2,11 +2,6 @@
 
 const STATUSES = ['New', 'Purchased', 'Done', 'Not buying'];
 const REFRESH_MS = 15000;
-const DRAFT_PREFIX = '#draft=';
-const MAX_TITLE = 200;
-const MAX_NOTE = 1000;
-const MAX_URL = 2048;
-const MAX_QUANTITY = 999;
 
 const listEl = document.getElementById('list');
 const emptyEl = document.getElementById('empty');
@@ -22,13 +17,9 @@ const loginForm = document.getElementById('login-form');
 const loginErrorEl = document.getElementById('login-error');
 const loginSubmit = document.getElementById('login-submit');
 const passwordInput = document.getElementById('password');
-const draftStatusEl = document.getElementById('draft-status');
 
 let refreshTimer = null;
 let authRequired = true;
-let pendingDraft = null;
-let draftSubmitting = false;
-let startupNotice = '';
 
 function showBanner(message, kind = 'error') {
   bannerEl.textContent = message;
@@ -40,18 +31,6 @@ function hideBanner() {
   bannerEl.hidden = true;
   bannerEl.textContent = '';
   bannerEl.dataset.kind = '';
-}
-
-function setDraftStatus(message, kind = 'info') {
-  draftStatusEl.textContent = message;
-  draftStatusEl.dataset.kind = kind;
-  draftStatusEl.hidden = false;
-}
-
-function hideDraftStatus() {
-  draftStatusEl.hidden = true;
-  draftStatusEl.textContent = '';
-  draftStatusEl.dataset.kind = '';
 }
 
 function formatTime(iso) {
@@ -112,7 +91,6 @@ function showLogin({ message = '', kind = 'info' } = {}) {
   summaryEl.hidden = true;
   emptyEl.hidden = true;
   loadingEl.hidden = true;
-  hideDraftStatus();
 
   if (message) {
     showBanner(message, kind);
@@ -123,110 +101,9 @@ function showLogin({ message = '', kind = 'info' } = {}) {
   passwordInput.focus();
 }
 
-function clearDraftFragment() {
-  if (!window.location.hash.startsWith(DRAFT_PREFIX)) return;
-  window.history.replaceState(null, '', window.location.pathname + window.location.search);
-}
-
-/**
- * Read the extension handoff from #draft=<encoded JSON>. The fragment is not
- * sent to the server, and is removed only after a successful submit.
- */
-function readDraftFragment() {
-  if (!window.location.hash.startsWith(DRAFT_PREFIX)) return null;
-
-  const raw = window.location.hash.slice(DRAFT_PREFIX.length);
-  let decoded = raw;
-  try {
-    decoded = decodeURIComponent(raw);
-  } catch {
-    // Fall back to the raw fragment; JSON.parse below decides if it is usable.
-  }
-
-  let payload;
-  try {
-    payload = JSON.parse(decoded);
-  } catch {
-    startupNotice = 'Could not read the request sent by the extension. Add it again from the extension.';
-    clearDraftFragment();
-    return null;
-  }
-
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    startupNotice = 'The extension sent an invalid request. Add it again from the extension.';
-    clearDraftFragment();
-    return null;
-  }
-
-  const title = typeof payload.title === 'string' ? payload.title.trim() : '';
-  const url = typeof payload.url === 'string' ? payload.url.trim() : '';
-  const note = typeof payload.note === 'string' ? payload.note.trim() : '';
-  const quantity = payload.quantity === undefined || payload.quantity === null ? 1 : payload.quantity;
-
-  const valid =
-    title.length > 0 &&
-    title.length <= MAX_TITLE &&
-    isHttpUrl(url) &&
-    url.length <= MAX_URL &&
-    note.length <= MAX_NOTE &&
-    Number.isInteger(quantity) &&
-    quantity >= 1 &&
-    quantity <= MAX_QUANTITY;
-
-  if (!valid) {
-    startupNotice =
-      'The request sent by the extension has invalid fields. Add it again from the extension.';
-    clearDraftFragment();
-    return null;
-  }
-
-  return { title, url, note, quantity };
-}
-
 function setLoginError(message) {
   loginErrorEl.textContent = message;
   loginErrorEl.hidden = !message;
-}
-
-async function submitPendingDraft() {
-  if (!pendingDraft || draftSubmitting) return;
-  draftSubmitting = true;
-  const draft = pendingDraft;
-  setDraftStatus(`Sending “${draft.title}” from the extension…`, 'info');
-
-  try {
-    const response = await fetch('/api/requests', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(draft),
-    });
-    const data = await response.json().catch(() => ({}));
-
-    if (response.status === 401) {
-      showLogin({ message: 'Your session expired. Log in again to send this request.' });
-      return;
-    }
-
-    if (!response.ok) {
-      const firstDetail =
-        data.details && typeof data.details === 'object' ? Object.values(data.details)[0] : '';
-      throw new Error(firstDetail || data.error || `Server returned ${response.status}.`);
-    }
-
-    pendingDraft = null;
-    clearDraftFragment();
-    hideBanner();
-    setDraftStatus(`Added “${data.request.title}” from the extension.`, 'success');
-    await loadRequests({ silent: true });
-  } catch (err) {
-    setDraftStatus(
-      `Could not add the extension request: ${err.message} ` +
-        'The draft is still in the address bar; refresh the page to retry.',
-      'error'
-    );
-  } finally {
-    draftSubmitting = false;
-  }
 }
 
 async function handleLogin(event) {
@@ -265,7 +142,6 @@ async function handleLogin(event) {
     authRequired = data.authRequired !== false;
     showApp();
     await loadRequests();
-    await submitPendingDraft();
   } catch {
     setLoginError('Could not reach the server. Try again.');
   } finally {
@@ -460,21 +336,14 @@ async function checkSession() {
     }
 
     authRequired = data.authRequired !== false;
-    const notice = startupNotice;
-    startupNotice = '';
 
     if (!data.authenticated) {
-      showLogin({
-        message:
-          notice || (pendingDraft ? 'Log in to add the request sent from the extension.' : ''),
-      });
+      showLogin();
       return;
     }
 
     showApp();
     await loadRequests();
-    if (notice) showBanner(notice, 'error');
-    await submitPendingDraft();
   } catch (err) {
     // Show the shell so the message is actionable; no data has been rendered.
     authRequired = true;
@@ -485,7 +354,6 @@ async function checkSession() {
 }
 
 async function init() {
-  pendingDraft = readDraftFragment();
   await checkSession();
 }
 

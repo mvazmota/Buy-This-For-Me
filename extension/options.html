@@ -28,6 +28,21 @@
         />
         <p id="backend-error" class="field-error" role="alert" hidden></p>
 
+        <label for="app-password">App password</label>
+        <input
+          id="app-password"
+          name="app-password"
+          type="password"
+          spellcheck="false"
+          autocomplete="off"
+          placeholder="The online dashboard password"
+        />
+        <p class="field-note">
+          Stored in this browser only and used only to send requests to the online dashboard.
+          Leave empty when using the local server.
+        </p>
+        <p id="password-error" class="field-error" role="alert" hidden></p>
+
         <button id="save" type="submit">Save</button>
         <p id="status" class="status" role="status" hidden></p>
       </form>
@@ -37,12 +52,12 @@
         <p>
           The extension uses <code>https://buy-this-for-me.m-vaz-mota.workers.dev</code> unless you
           save a different URL here. Use the Worker root URL, with no <code>/api</code> path, query
-          string, or password.
+          string, or password in the URL.
         </p>
         <p>
-          When the configured URL is remote, the extension opens the dashboard in a new tab and
-          hands the request over in the URL fragment. Log in on the dashboard when prompted; the
-          request is submitted once after login. The extension never stores the app password.
+          When the configured URL is remote, the extension sends each request straight to the
+          Worker, with no new tab. Save the app password here first; sending asks you to update it
+          in Settings if it is missing or wrong. The password stays in this browser profile.
         </p>
 
         <h2>Local server (optional)</h2>

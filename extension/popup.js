@@ -81,6 +81,11 @@ function isHttpUrl(value) {
   }
 }
 
+// fetch() rejects with a TypeError when the server cannot be reached.
+function isNetworkError(err) {
+  return err instanceof TypeError || Boolean(err && err.name === 'TypeError');
+}
+
 function validate() {
   const errors = {};
   const title = titleInput.value.trim();
@@ -128,7 +133,7 @@ async function applyBackend() {
     backendHint.textContent = '';
   } else {
     backendHint.textContent =
-      'Online dashboard: a new tab opens after you submit. Log in there if prompted; the request is sent once.';
+      'Online dashboard: requests are sent directly from this popup. Save the app password in Settings.';
     backendHint.hidden = false;
   }
 }
@@ -188,7 +193,7 @@ async function sendToLocal(payload) {
     showStatus(`Sent “${data.request.title}”.`, 'success');
     return true;
   } catch (err) {
-    const unreachable = err instanceof TypeError;
+    const unreachable = isNetworkError(err);
     showStatus(
       unreachable
         ? `Cannot reach the local server at ${backendUrl}. Start it with "npm start" in the project folder, then try again.`
@@ -199,21 +204,50 @@ async function sendToLocal(payload) {
   }
 }
 
-async function openRemoteDraft(payload) {
-  // The remote Worker requires a login. Hand the request to the dashboard in
-  // the URL fragment so it can submit after login, same-origin.
-  const draftUrl = `${backendUrl}/#draft=${encodeURIComponent(JSON.stringify(payload))}`;
+async function sendToRemote(payload) {
+  const password = await getAppPassword();
+  if (!password) {
+    showStatus('No app password saved. Add it in Settings, then try again.', 'error');
+    return false;
+  }
+
   try {
-    // Log in happens on the dashboard, so bring the tab to the foreground.
-    await chrome.tabs.create({ url: draftUrl, active: true });
+    const response = await fetch(`${backendUrl}/api/requests`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-App-Password': password,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (response.status === 401) {
+      showStatus('Password is missing or wrong. Update it in Settings.', 'error');
+      return false;
+    }
+
+    if (!response.ok) {
+      if (data.details && typeof data.details === 'object') {
+        setFieldErrors(data.details);
+        showStatus(data.error || 'The server rejected this request. Check the fields above.', 'error');
+      } else {
+        showStatus(data.error || `Server returned ${response.status}.`, 'error');
+      }
+      return false;
+    }
+
     resetFormAfterSuccess();
-    showStatus(
-      'Opened the online dashboard in a new tab. Log in there if prompted; the request will be submitted once.',
-      'success'
-    );
+    showStatus(`Sent “${data.request.title}”.`, 'success');
     return true;
   } catch (err) {
-    showStatus(`Could not open the dashboard tab: ${err.message}`, 'error');
+    showStatus(
+      isNetworkError(err)
+        ? `Cannot reach the server at ${backendUrl}. Check your connection and the dashboard URL in Settings.`
+        : `Could not send the request: ${err.message}`,
+      'error'
+    );
     return false;
   }
 }
@@ -233,7 +267,7 @@ async function submitRequest(event) {
     await backendReady;
     const ok = isLocalBackend(backendUrl)
       ? await sendToLocal(payload)
-      : await openRemoteDraft(payload);
+      : await sendToRemote(payload);
     if (ok) await prefillFromActiveTab();
   } finally {
     submitButton.disabled = false;

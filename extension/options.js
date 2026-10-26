@@ -2,14 +2,27 @@
 
 const form = document.getElementById('settings-form');
 const urlInput = document.getElementById('backend-url');
-const errorEl = document.getElementById('backend-error');
+const passwordInput = document.getElementById('app-password');
+const urlErrorEl = document.getElementById('backend-error');
+const passwordErrorEl = document.getElementById('password-error');
 const statusEl = document.getElementById('status');
 const saveButton = document.getElementById('save');
 
-function showError(message) {
-  errorEl.textContent = message;
-  errorEl.hidden = !message;
+function showUrlError(message) {
+  urlErrorEl.textContent = message;
+  urlErrorEl.hidden = !message;
   urlInput.setAttribute('aria-invalid', message ? 'true' : 'false');
+}
+
+function showPasswordError(message) {
+  passwordErrorEl.textContent = message;
+  passwordErrorEl.hidden = !message;
+  passwordInput.setAttribute('aria-invalid', message ? 'true' : 'false');
+}
+
+function clearErrors() {
+  showUrlError('');
+  showPasswordError('');
 }
 
 function showStatus(message, kind = 'success') {
@@ -26,26 +39,46 @@ function hideStatus() {
 
 async function load() {
   urlInput.value = await getBackendUrl();
+  passwordInput.value = await getAppPassword();
 }
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
-  showError('');
+  clearErrors();
   hideStatus();
+
+  let saved;
+  try {
+    saved = normalizeBackendUrl(urlInput.value);
+  } catch (err) {
+    showUrlError(err.message);
+    urlInput.focus();
+    return;
+  }
+
+  const password = passwordInput.value.trim();
+  if (!isLocalBackend(saved) && !password) {
+    showPasswordError('Enter the app password for the online dashboard.');
+    passwordInput.focus();
+    return;
+  }
+
   saveButton.disabled = true;
   saveButton.textContent = 'Saving…';
 
   try {
-    const saved = await setBackendUrl(urlInput.value);
+    await setBackendUrl(saved);
+    await setAppPassword(password, saved);
     urlInput.value = saved;
+    passwordInput.value = password;
     showStatus(
       isLocalBackend(saved)
         ? 'Saved. Requests will go to the local server.'
-        : 'Saved. Requests will open the online dashboard in a new tab.',
+        : 'Saved. Requests will be sent directly to the online dashboard.',
       'success'
     );
   } catch (err) {
-    showError(err.message);
+    showUrlError(err.message);
   } finally {
     saveButton.disabled = false;
     saveButton.textContent = 'Save';
@@ -53,7 +86,12 @@ form.addEventListener('submit', async (event) => {
 });
 
 urlInput.addEventListener('input', () => {
-  showError('');
+  showUrlError('');
+  hideStatus();
+});
+
+passwordInput.addEventListener('input', () => {
+  showPasswordError('');
   hideStatus();
 });
 

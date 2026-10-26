@@ -41,7 +41,7 @@ function createElement() {
  * Run the real extension scripts in a vm context with just enough browser
  * stubs to exercise the popup's submit paths.
  */
-function loadPopup({ backendUrl = REMOTE_URL, fetchImpl } = {}) {
+function loadPopup({ backendUrl = REMOTE_URL, appPassword = 'family secret', fetchImpl } = {}) {
   const elements = new Map();
   const document = {
     activeElement: null,
@@ -55,14 +55,20 @@ function loadPopup({ backendUrl = REMOTE_URL, fetchImpl } = {}) {
   };
 
   const createdTabs = [];
+  const stored = {};
+  if (backendUrl !== null) stored.backendUrl = backendUrl;
+  if (appPassword !== null) stored.appPassword = appPassword;
+
   const chrome = {
     storage: {
       local: {
-        async get() {
-          // Treat null as "no stored value"; the parameter default is a stored URL.
-          return backendUrl === null ? {} : { backendUrl };
+        async get(key) {
+          if (key === undefined) return { ...stored };
+          return key in stored ? { [key]: stored[key] } : {};
         },
-        async set() {},
+        async set(values) {
+          Object.assign(stored, values);
+        },
       },
     },
     tabs: {
@@ -93,12 +99,12 @@ function loadPopup({ backendUrl = REMOTE_URL, fetchImpl } = {}) {
     const source = fs.readFileSync(path.join(__dirname, '..', 'extension', file), 'utf8');
     const suffix =
       file === 'popup.js'
-        ? '\n;globalThis.__popupTest = { openRemoteDraft, sendToLocal, backendReady, getBackendUrl };'
+        ? '\n;globalThis.__popupTest = { sendToRemote, sendToLocal, backendReady, getBackendUrl, getAppPassword, setAppPassword };'
         : '';
     vm.runInContext(source + suffix, context, { filename: file });
   }
 
-  return { ...context.__popupTest, elements, createdTabs };
+  return { ...context.__popupTest, elements, createdTabs, stored };
 }
 
 test('no stored backend URL falls back to the deployed Worker URL', async () => {
@@ -111,8 +117,20 @@ test('an explicitly saved backend URL is not replaced by the default', async () 
   assert.equal(await getBackendUrl(), LOCAL_URL);
 });
 
-test('remote submissions open the dashboard in a foreground tab', async () => {
-  const { openRemoteDraft, backendReady, elements, createdTabs } = loadPopup();
+test('remote submissions post directly to the Worker with the saved app password', async () => {
+  const calls = [];
+  const fetchImpl = async (url, options) => {
+    calls.push({ url, options });
+    return {
+      ok: true,
+      status: 201,
+      async json() {
+        return { request: { title: 'Running shoes' } };
+      },
+    };
+  };
+
+  const { sendToRemote, backendReady, elements, createdTabs } = loadPopup({ fetchImpl });
   await backendReady;
 
   const payload = {
@@ -121,20 +139,80 @@ test('remote submissions open the dashboard in a foreground tab', async () => {
     note: 'Size 43',
     quantity: 2,
   };
-  assert.equal(await openRemoteDraft(payload), true);
+  assert.equal(await sendToRemote(payload), true);
 
-  assert.equal(createdTabs.length, 1);
-  assert.equal(createdTabs[0].active, true);
-
-  const created = new URL(createdTabs[0].url);
-  assert.equal(created.origin, REMOTE_URL);
-  const draft = JSON.parse(decodeURIComponent(created.hash.slice('#draft='.length)));
-  assert.deepEqual(draft, payload);
+  assert.equal(createdTabs.length, 0);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, `${REMOTE_URL}/api/requests`);
+  assert.equal(calls[0].options.method, 'POST');
+  assert.equal(calls[0].options.headers['Content-Type'], 'application/json');
+  assert.equal(calls[0].options.headers['X-App-Password'], 'family secret');
+  assert.deepEqual(JSON.parse(calls[0].options.body), payload);
 
   const status = elements.get('status');
   assert.equal(status.hidden, false);
-  assert.match(status.children[0].textContent, /new tab/i);
-  assert.doesNotMatch(status.children[0].textContent, /background/i);
+  assert.equal(status.dataset.kind, 'success');
+  assert.equal(status.children[0].textContent, 'Sent “Running shoes”. ');
+  assert.equal(status.children[1].textContent, 'Open dashboard');
+  assert.equal(status.children[1].href, `${REMOTE_URL}/`);
+});
+
+test('a rejected remote password points at the extension settings', async () => {
+  const fetchImpl = async () => ({
+    ok: false,
+    status: 401,
+    async json() {
+      return { error: 'Authentication required.' };
+    },
+  });
+
+  const { sendToRemote, backendReady, elements, createdTabs } = loadPopup({ fetchImpl });
+  await backendReady;
+
+  const payload = {
+    title: 'Running shoes',
+    url: 'https://example.com/shoes',
+    note: '',
+    quantity: 1,
+  };
+  assert.equal(await sendToRemote(payload), false);
+  assert.equal(createdTabs.length, 0);
+  assert.equal(
+    elements.get('status').textContent,
+    'Password is missing or wrong. Update it in Settings.'
+  );
+});
+
+test('an unreachable remote server reports a network error', async () => {
+  const fetchImpl = async () => {
+    throw new TypeError('Failed to fetch');
+  };
+
+  const { sendToRemote, backendReady, elements } = loadPopup({ fetchImpl });
+  await backendReady;
+
+  const payload = {
+    title: 'Running shoes',
+    url: 'https://example.com/shoes',
+    note: '',
+    quantity: 1,
+  };
+  assert.equal(await sendToRemote(payload), false);
+  assert.match(elements.get('status').textContent, /Cannot reach the server/);
+});
+
+test('app password saves trimmed, must not be empty for a remote backend, may be empty locally', async () => {
+  const { getAppPassword, setAppPassword, stored } = loadPopup({ appPassword: null });
+
+  assert.equal(await getAppPassword(), '');
+  await assert.rejects(() => setAppPassword('   ', REMOTE_URL), /app password/i);
+
+  assert.equal(await setAppPassword('  family secret  ', REMOTE_URL), 'family secret');
+  assert.equal(stored.appPassword, 'family secret');
+  assert.equal(await getAppPassword(), 'family secret');
+
+  assert.equal(await setAppPassword('', LOCAL_URL), '');
+  assert.equal(stored.appPassword, '');
 });
 
 test('local submissions still post directly and open no tab', async () => {
@@ -192,6 +270,18 @@ test('manifest declares PNG icons and toolbar icons that exist', () => {
       assert.equal(bytes.readUInt32BE(20), size, `${relative} has the wrong height`);
     }
   }
+});
+
+test('manifest allows direct Worker and local-server calls without losing storage', () => {
+  const manifest = JSON.parse(
+    fs.readFileSync(path.join(ROOT, 'extension', 'manifest.json'), 'utf8'),
+  );
+
+  assert.ok(manifest.permissions.includes('storage'));
+  assert.ok(manifest.permissions.includes('activeTab'));
+  assert.ok(manifest.host_permissions.includes('http://127.0.0.1:3000/*'));
+  assert.ok(manifest.host_permissions.includes('http://localhost:3000/*'));
+  assert.ok(manifest.host_permissions.includes(`${WORKER_URL}/*`));
 });
 
 test('dashboard HTML links the SVG favicon and the file exists', () => {

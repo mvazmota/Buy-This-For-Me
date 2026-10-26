@@ -185,6 +185,96 @@ workerTest('cross-origin API requests are rejected', async () => {
   assert.match((await readJson(response)).error, /Cross-origin/);
 });
 
+workerTest('cross-origin request creation still requires the session cookie', async () => {
+  const worker = (await loadWorker()).default;
+  const env = envWithDb();
+
+  const getResponse = await worker.fetch(
+    new Request(`${WORKER_URL}/api/requests`, {
+      headers: { Origin: 'https://evil.example', 'X-App-Password': PASSWORD },
+    }),
+    env
+  );
+  assert.equal(getResponse.status, 403);
+
+  const patchResponse = await worker.fetch(
+    new Request(`${WORKER_URL}/api/requests/some-id`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: 'https://evil.example',
+        'X-App-Password': PASSWORD,
+      },
+      body: JSON.stringify({ status: 'Purchased' }),
+    }),
+    env
+  );
+  assert.equal(patchResponse.status, 403);
+});
+
+workerTest('the extension app-password header creates requests without a cookie', async () => {
+  const worker = (await loadWorker()).default;
+  const env = envWithDb();
+
+  const created = await worker.fetch(
+    new Request(`${WORKER_URL}/api/requests`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: 'chrome-extension://abc',
+        'X-App-Password': PASSWORD,
+      },
+      body: JSON.stringify({
+        title: 'Running shoes',
+        url: 'https://example.com/shoes',
+        note: 'Size 43',
+        quantity: 2,
+      }),
+    }),
+    env
+  );
+  assert.equal(created.status, 201);
+  assert.equal(created.headers.get('set-cookie'), null);
+
+  const body = await readJson(created);
+  assert.equal(body.request.title, 'Running shoes');
+  assert.equal(body.request.status, 'New');
+  assert.equal(env.DB.rows.length, 1);
+
+  for (const headers of [
+    { 'Content-Type': 'application/json', Origin: 'chrome-extension://abc' },
+    { 'Content-Type': 'application/json', Origin: 'chrome-extension://abc', 'X-App-Password': 'wrong' },
+  ]) {
+    const rejected = await worker.fetch(
+      new Request(`${WORKER_URL}/api/requests`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ title: 'Shoes', url: 'https://example.com/shoes' }),
+      }),
+      env
+    );
+    assert.equal(rejected.status, 401);
+    assert.deepEqual(await readJson(rejected), { error: 'Authentication required.' });
+  }
+
+  assert.equal(env.DB.rows.length, 1);
+
+  const invalid = await worker.fetch(
+    new Request(`${WORKER_URL}/api/requests`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: 'chrome-extension://abc',
+        'X-App-Password': PASSWORD,
+      },
+      body: JSON.stringify({ title: '', url: 'javascript:alert(1)' }),
+    }),
+    env
+  );
+  assert.equal(invalid.status, 400);
+  assert.ok((await readJson(invalid)).details.title);
+});
+
 workerTest('missing APP_PASSWORD refuses login without revealing config', async () => {
   const worker = (await loadWorker()).default;
   const response = await worker.fetch(login(), { DB: createFakeD1() });

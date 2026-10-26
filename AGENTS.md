@@ -51,13 +51,15 @@ npx wrangler deploy
 
 ## Security Requirements
 
-- `APP_PASSWORD` belongs only in the Cloudflare Worker secret store.
-- Never commit, print, expose, or ask the user to paste the secret value. Do not place it in
-  `wrangler.jsonc`, `.dev.vars`, build commands, source, tests, or the extension.
+- `APP_PASSWORD` is the Cloudflare Worker secret and the app password saved in the extension
+  settings. Never commit, print, expose, or ask the user to paste the secret value. Do not place
+  it in `wrangler.jsonc`, `.dev.vars`, build commands, source, or tests.
+- The extension stores the app password locally in `chrome.storage.local` (key `appPassword`).
+  This is a deliberate, family-only accepted risk. The value must never be committed or
+  hardcoded, and it is used only for `POST /api/requests` from the extension via the
+  `X-App-Password` header. Do not send it to any other endpoint.
 - The local server has no authentication. Bind it only to loopback. Never tunnel,
   port-forward, reverse-proxy, or bind it to `0.0.0.0`.
-- The extension must never store credentials. Remote handoff uses the URL fragment and the
-  dashboard's same-origin API after login.
 - Do not commit `data/`, `.dev.vars`, secrets, or build output. Preserve `.gitignore`.
 
 ## Compatibility Contracts
@@ -66,8 +68,9 @@ npx wrangler deploy
   local = password-free; online = login required.
 - Local mode's `/api/session`, `/api/login`, and `/api/logout` remain permissive so the
   dashboard does not prompt for a password.
-- Preserve the extension's remote handoff behavior: open the dashboard, hand over a draft via
-  the URL fragment, and clear the fragment only after a successful submit.
+- The extension submits remote requests itself: it POSTs to
+  `https://buy-this-for-me.m-vaz-mota.workers.dev/api/requests` with the `X-App-Password`
+  header. There is no dashboard tab or `#draft` fragment handoff.
 - Keep changes consistent with the existing plain Node/browser JavaScript style. Do not add a
   framework or front-end build step without explicit approval.
 

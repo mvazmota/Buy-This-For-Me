@@ -167,8 +167,16 @@ async function updateStatus(env, id, status) {
   return { ...rowToRequest(existing), status, updatedAt };
 }
 
-async function handleRequests(request, env, url) {
-  if (!(await isAuthenticated(request, env))) {
+async function isExtensionAuthorized(request, env) {
+  const submitted = request.headers.get('x-app-password');
+  if (submitted === null) return false;
+  const password = configuredPassword(env);
+  if (!password) return false;
+  return passwordMatches(submitted, password);
+}
+
+async function handleRequests(request, env, url, extensionAuthorized = false) {
+  if (!extensionAuthorized && !(await isAuthenticated(request, env))) {
     return json({ error: 'Authentication required.' }, 401);
   }
 
@@ -236,8 +244,17 @@ async function handleLogin(request, env) {
 }
 
 async function handleApi(request, env, url) {
-  if (!isSameOrigin(request, url)) {
-    return json({ error: 'Cross-origin requests are not allowed.' }, 403);
+  // The extension posts new requests directly to POST /api/requests with the
+  // app password in the X-App-Password header. That header only bypasses the
+  // same-origin check and the session cookie for that one route and method.
+  const extensionPath =
+    url.pathname === '/api/requests' && request.method === 'POST';
+  const extensionAuthorized = extensionPath && (await isExtensionAuthorized(request, env));
+
+  if (!extensionAuthorized && !isSameOrigin(request, url)) {
+    return extensionPath
+      ? json({ error: 'Authentication required.' }, 401)
+      : json({ error: 'Cross-origin requests are not allowed.' }, 403);
   }
 
   if (url.pathname === '/api/health') {
@@ -268,7 +285,7 @@ async function handleApi(request, env, url) {
   }
 
   if (url.pathname === '/api/requests' || url.pathname.startsWith('/api/requests/')) {
-    return handleRequests(request, env, url);
+    return handleRequests(request, env, url, extensionAuthorized);
   }
 
   return json({ error: 'API route not found.' }, 404);

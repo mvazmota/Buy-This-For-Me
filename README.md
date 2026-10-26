@@ -8,7 +8,7 @@ the local server is an explicit opt-in for development.
 
 - **Online mode (default):** Cloudflare Worker + D1 + static dashboard from `public/`,
   protected by the `APP_PASSWORD` Worker secret. HTTPS only on `workers.dev`. The extension
-  opens the dashboard in a new tab and hands the request over after login.
+  posts requests straight to the Worker with the saved app password; no dashboard tab opens.
 - **Local mode (optional):** `npm start`, no password, data in `data/requests.json`. Binds to
   `127.0.0.1` only. Never expose it to the internet. Requires saving
   `http://127.0.0.1:3000` in the extension settings.
@@ -86,8 +86,8 @@ extension settings. The local server binds to loopback only.
 6. Open a normal product page (`http://` or `https://`), click the extension icon. The popup
    pre-fills the page title and link.
 7. Edit the title if needed, set quantity (default 1), add an optional note, then click
-   **Send request**. By default this opens the online Worker dashboard in a new tab; log in
-   there if prompted and the request is submitted once. See below to switch to the local
+   **Send request**. By default this sends directly to the online Worker, so save the app
+   password in the extension settings first (section 2). See below to switch to the local
    server.
 8. Open the dashboard to see it. The popup footer links to the configured dashboard.
 
@@ -97,11 +97,12 @@ After editing extension files, return to `edge://extensions` and click the exten
 ### Extension backend settings
 
 Open the extension's **Settings** (extension options) from the popup footer or from
-`edge://extensions` → **Details** → **Extension options**.
+`edge://extensions` → **Details** → **Extension options**. The form saves the Dashboard URL
+and the App password together.
 
 | Backend URL | Behaviour |
 | --- | --- |
-| `https://buy-this-for-me.m-vaz-mota.workers.dev` (default) | Opens the online dashboard in a new foreground tab and hands over the request in the URL fragment. You log in on the dashboard if prompted; the request is submitted once after login. |
+| `https://buy-this-for-me.m-vaz-mota.workers.dev` (default) | Sends the request directly to the Worker from the popup. No new tab. Requires the app password to be saved in the extension settings. |
 | `http://127.0.0.1:3000` | Explicit local override. Posts directly to the local server started with `npm start`. No password. |
 
 The extension uses the deployed Worker when no backend URL is saved. Saving a value replaces
@@ -109,26 +110,23 @@ that fallback for this browser profile; the extension never overwrites an explic
 URL on its own. To return to the online Worker, save
 `https://buy-this-for-me.m-vaz-mota.workers.dev` again.
 
-Rules for the setting:
+Rules for the settings:
 
 - Use the dashboard **root** URL. No `/api`, query string, or `#fragment`.
 - A remote URL must use `https://`. Plain `http://` is accepted only for the local server.
-- Never enter a password in the extension. The app password is typed only on the dashboard and
-  is never stored by the extension.
-
-The fragment (`#draft=<encoded JSON>`) is not sent to the Cloudflare server; browsers keep
-fragments client-side. The dashboard removes it with `history.replaceState` only after a
-successful submit, so a refresh does not accidentally post the same item twice. If submission
-fails, the draft stays in the address and the dashboard offers an error message; refresh to
-retry.
+- The app password is saved in `chrome.storage.local` in this browser profile only, and is
+  used only to POST requests to the configured Worker. It is never committed to the project.
+  Saving a remote URL without a password is rejected with a field error.
+- When the password is missing or wrong, the popup says so and asks you to update it in
+  Settings. Nothing else is retried or queued.
 
 ### Permissions used
 
 | Permission | Why |
 | --- | --- |
 | `activeTab` | Read the active tab's title and URL only when you click the extension icon. |
-| `storage` | Remember the dashboard URL chosen in the extension settings. |
-| Host permissions for `http://127.0.0.1:3000/*` and `http://localhost:3000/*` | Allow the popup to call the local server. Remote dashboards are opened as normal tabs, not fetched by the extension, so they need no host permission. |
+| `storage` | Remember the dashboard URL and the app password chosen in the extension settings. |
+| Host permissions for `http://127.0.0.1:3000/*`, `http://localhost:3000/*` and `https://buy-this-for-me.m-vaz-mota.workers.dev/*` | Allow the popup to POST directly to the local server and to the deployed Worker. |
 
 If a browser-internal page (`edge://`, `chrome://`, extension pages) is active, its link is
 left blank because the API only accepts `http://` and `https://` links.
@@ -143,8 +141,8 @@ left blank because the API only accepts `http://` and `https://` links.
 - The page refreshes every 15 seconds and has a **Refresh** button.
 - Online, the dashboard asks for the app password. After login it uses a signed, HttpOnly,
   Secure, SameSite=Lax cookie valid for 7 days. **Log out** clears it. If the session expires
-  while the page is open, the dashboard returns to the login view; an unsent extension draft
-  is kept and submitted after the next successful login.
+  while the page is open, the dashboard returns to the login view; requests added from the
+  extension do not depend on this cookie.
 - Local mode hides **Log out** and never asks for a password.
 
 ## 4. Data and backups (local mode)
@@ -162,8 +160,9 @@ Changing the Worker or redeploying does not clear D1.
 ## 5. HTTP API
 
 All responses are JSON. Local base URL: `http://127.0.0.1:3000`. Online base URL:
-`https://buy-this-for-me.m-vaz-mota.workers.dev`. Calls must be same-origin; cross-origin API
-requests are rejected by the Worker.
+`https://buy-this-for-me.m-vaz-mota.workers.dev`. Calls must be same-origin, except the
+extension's direct `POST /api/requests`, which authenticates with the `X-App-Password` header.
+Other cross-origin API requests are rejected by the Worker.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
@@ -172,7 +171,7 @@ requests are rejected by the Worker.
 | `POST` | `/api/login` | Body `{"password":"..."}`; sets the session cookie online |
 | `POST` | `/api/logout` | Clears the session cookie online |
 | `GET` | `/api/requests` | `{"requests":[...]}` newest first (online: login required) |
-| `POST` | `/api/requests` | Create a request (online: login required) |
+| `POST` | `/api/requests` | Create a request (online: login cookie or `X-App-Password` header) |
 | `PATCH` | `/api/requests/:id` | Update only the status (online: login required) |
 
 Create body:
@@ -206,7 +205,11 @@ error (generic message). A request defaults to status `New` and records `submitt
 `updatedAt` as ISO timestamps.
 
 Online, `/api/requests` and `/api/requests/:id` return `401` until the login cookie is valid.
-Login errors are deliberately generic and never reveal the configured password.
+The one exception is `POST /api/requests`: the extension sends its saved app password in the
+`X-App-Password` header, and a valid value authorises that single request without a cookie. A
+missing or wrong header on a cross-origin create returns `401` and stores nothing. Login
+errors are deliberately generic and never reveal the configured password, and the password is
+never echoed in a response or a log.
 
 ## 6. Tests and syntax checks
 
@@ -309,13 +312,16 @@ npx wrangler secret put APP_PASSWORD
 
 Paste the password when prompted. It is stored encrypted by Cloudflare and is not written to
 this repository. Do not put it in `wrangler.jsonc`, `.dev.vars`, a build command, or the
-extension. `wrangler secret put` needs the Worker to exist, which is why the first deploy comes
+source. You enter it once in the extension settings; there it is saved only in that browser
+profile (`chrome.storage.local`) so the popup can post requests directly.
+`wrangler secret put` needs the Worker to exist, which is why the first deploy comes
 first. To rotate the password later, run the command again; this invalidates existing session
-cookies.
+cookies and requires updating the extension settings.
 
-Open the deployed URL, log in with the password, and add a test request. Then set that root
-URL in the extension settings (section 2) and test the online handoff. If login returns "Login
-is not available", the `APP_PASSWORD` secret is missing for that Worker.
+Open the deployed URL, log in with the password, and add a test request. Then save that root
+URL and the same password in the extension settings (section 2) and send a test request from
+a product page. If login returns "Login is not available", the `APP_PASSWORD` secret is
+missing for that Worker.
 
 ### 7.6 Connect Cloudflare Workers Builds to GitHub
 
@@ -374,11 +380,11 @@ The extension already uses `https://buy-this-for-me.m-vaz-mota.workers.dev` by d
 setting is needed unless you previously saved another URL.
 
 1. Open the extension settings and check the Dashboard URL. If you saved the local URL while
-   developing, replace it with `https://buy-this-for-me.m-vaz-mota.workers.dev` and save.
-2. Submit a request from a product page.
-3. A new dashboard tab opens in the foreground with the draft. Log in if prompted; the
-   request submits once and the fragment is cleared. A refresh afterwards must not post it
-   again.
+   developing, replace it with `https://buy-this-for-me.m-vaz-mota.workers.dev`, enter the app
+   password, and save.
+2. Submit a request from a product page. The popup posts it directly to the Worker and shows
+   `Sent “title”.` with the dashboard link. No new tab opens.
+3. Open the dashboard, log in if needed, and confirm the request appears after a refresh.
 
 Local mode is opt-in: save `http://127.0.0.1:3000` to use the direct local POST path. A local
 URL never reaches the online Worker.
@@ -393,13 +399,15 @@ URL never reaches the online Worker.
   Secure and SameSite=Lax, and expires after 7 days. Logging out clears it; rotating the
   secret invalidates all sessions.
 - The API rejects cross-origin calls and returns generic login/internal errors. No CORS
-  headers are added. Request bodies are capped at 64 KB.
-- The password is a Cloudflare Worker secret. It is never stored in the extension, the
-  dashboard, or git. Do not reuse an important password.
-- There is no rate limiting on login. Choose a long random password.
+  headers are added. The only cross-origin exception is the extension's
+  `POST /api/requests` with a valid `X-App-Password` header. Request bodies are capped at 64 KB.
+- `APP_PASSWORD` is a Cloudflare Worker secret. The extension also saves the same password in
+  `chrome.storage.local` in this browser profile for direct submissions (family-only accepted
+  risk). It is never committed to git and never hardcoded in source. Do not reuse an important
+  password.
+- There is no rate limiting on login or on extension submissions. Choose a long random password.
 - No editing or deleting of existing requests, no categories, no purchase dates. A request can
-  be submitted twice if you send it twice. The extension's remote handoff avoids automatic
-  replay after a successful submit, but a failed response can still lead to a retry.
+  be submitted twice if you click Send twice; the popup does not queue or retry failed sends.
 - The dashboard renders `http(s)` links only; titles and notes are inserted as text, not HTML.
 - D1 is eventually consistent across Cloudflare locations; the dashboard's 15-second refresh
   is usually enough for a household list.
@@ -409,14 +417,14 @@ URL never reaches the online Worker.
 | Symptom | Fix |
 | --- | --- |
 | Popup says it cannot reach `http://127.0.0.1:3000` (local override) | Start the local server (`npm start`) and keep that window open. |
-| Requests open the online dashboard but you wanted the local server | Save `http://127.0.0.1:3000` in the extension settings. The Worker is the default. |
+| Requests go to the online Worker but you wanted the local server | Save `http://127.0.0.1:3000` in the extension settings. The Worker is the default. |
 | `Port 3000 is already in use` | Stop the other process. The extension only supports port 3000 without a manifest change. |
 | Dashboard shows "Could not load requests" | Local: server stopped or wrong port. Online: check the Worker URL and login. Press Refresh. |
 | Online dashboard shows the login form after working | The 7-day session expired or the secret was rotated. Log in again. |
 | Login says "Login is not available" | The Worker has no `APP_PASSWORD` secret. Run `npx wrangler secret put APP_PASSWORD`. |
 | `wrangler deploy` rejects the database id | Replace the all-zero placeholder in `wrangler.jsonc` with the id from `wrangler d1 create`. |
-| Remote extension submit opens a blank/404 tab | Use the Worker **root** URL in extension settings, with `https://` and no path. |
-| Extension draft is not submitted automatically | Log in on the dashboard tab. The draft is kept in the URL fragment until a successful submit. |
+| Popup says "Password is missing or wrong" | Open the extension settings and save the current app password. Rotating the Worker secret requires updating it there too. |
+| Popup says it cannot reach the online server | Check the network connection and the Dashboard URL in extension settings; the Worker URL must be the `https://` root with no path. |
 | Title/link not pre-filled | Click the icon on a normal `http(s)` page. Reload the extension after file edits. |
 | Changes not visible | Reload the extension in `edge://extensions`; refresh the dashboard. |
 | Server refuses to start and mentions invalid JSON | `data\requests.json` is malformed. Move it aside, then restart. |

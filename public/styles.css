@@ -177,28 +177,6 @@ textarea {
   color: #ffffff;
 }
 
-.draft-status {
-  margin: 0 0 16px;
-  padding: 10px 14px;
-  border-radius: 10px;
-  border: 1px solid var(--accent);
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-size: 14px;
-}
-
-.draft-status[data-kind="success"] {
-  border-color: var(--ok);
-  background: var(--ok-soft);
-  color: var(--ok);
-}
-
-.draft-status[data-kind="error"] {
-  border-color: var(--danger);
-  background: var(--danger-soft);
-  color: var(--danger);
-}
-
 .summary {
   margin: 0 0 12px;
   color: var(--muted);

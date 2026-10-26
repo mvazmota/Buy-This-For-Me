@@ -3,6 +3,7 @@
 // Shared backend settings for the popup and options page.
 const DEFAULT_BACKEND_URL = 'https://buy-this-for-me.m-vaz-mota.workers.dev';
 const BACKEND_STORAGE_KEY = 'backendUrl';
+const APP_PASSWORD_STORAGE_KEY = 'appPassword';
 const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost']);
 
 function isLocalBackend(urlValue) {
@@ -79,4 +80,40 @@ async function setBackendUrl(value) {
   const normalized = normalizeBackendUrl(value);
   await chrome.storage.local.set({ [BACKEND_STORAGE_KEY]: normalized });
   return normalized;
+}
+
+/**
+ * Read the saved app password, if any. It is stored in this browser profile
+ * only (family-only tool, accepted risk) and is sent only to POST
+ * /api/requests on the configured backend.
+ */
+async function getAppPassword() {
+  try {
+    const stored = await chrome.storage.local.get(APP_PASSWORD_STORAGE_KEY);
+    const value = stored[APP_PASSWORD_STORAGE_KEY];
+    return typeof value === 'string' ? value.trim() : '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Save (or clear) the app password. An empty value is only allowed for the
+ * local server, which does not ask for a password; remote backends require one.
+ * Pass the backend URL when the caller has just normalized it.
+ */
+async function setAppPassword(value, backendUrl) {
+  const trimmed = String(value || '').trim();
+  const backend = backendUrl === undefined ? await getBackendUrl() : normalizeBackendUrl(backendUrl);
+
+  if (!trimmed) {
+    if (!isLocalBackend(backend)) {
+      throw new Error('Enter the app password for the online dashboard.');
+    }
+    await chrome.storage.local.set({ [APP_PASSWORD_STORAGE_KEY]: '' });
+    return '';
+  }
+
+  await chrome.storage.local.set({ [APP_PASSWORD_STORAGE_KEY]: trimmed });
+  return trimmed;
 }
