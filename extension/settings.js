@@ -1,7 +1,7 @@
 'use strict';
 
 // Shared backend settings for the popup and options page.
-const DEFAULT_BACKEND_URL = 'http://127.0.0.1:3000';
+const DEFAULT_BACKEND_URL = 'https://buy-this-for-me.m-vaz-mota.workers.dev';
 const BACKEND_STORAGE_KEY = 'backendUrl';
 const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost']);
 
@@ -28,7 +28,9 @@ function normalizeBackendUrl(rawValue) {
   try {
     parsed = new URL(trimmed);
   } catch {
-    throw new Error('Enter a full URL, for example http://127.0.0.1:3000.');
+    throw new Error(
+      'Enter a full URL, for example https://buy-this-for-me.m-vaz-mota.workers.dev.'
+    );
   }
 
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {

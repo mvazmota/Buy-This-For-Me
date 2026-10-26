@@ -7,6 +7,7 @@ const test = require('node:test');
 const vm = require('node:vm');
 
 const REMOTE_URL = 'https://buy-this-for-me.example.workers.dev';
+const WORKER_URL = 'https://buy-this-for-me.m-vaz-mota.workers.dev';
 const LOCAL_URL = 'http://127.0.0.1:3000';
 
 function createElement() {
@@ -54,7 +55,8 @@ function loadPopup({ backendUrl = REMOTE_URL, fetchImpl } = {}) {
     storage: {
       local: {
         async get() {
-          return { backendUrl };
+          // Treat null as "no stored value"; the parameter default is a stored URL.
+          return backendUrl === null ? {} : { backendUrl };
         },
         async set() {},
       },
@@ -87,13 +89,23 @@ function loadPopup({ backendUrl = REMOTE_URL, fetchImpl } = {}) {
     const source = fs.readFileSync(path.join(__dirname, '..', 'extension', file), 'utf8');
     const suffix =
       file === 'popup.js'
-        ? '\n;globalThis.__popupTest = { openRemoteDraft, sendToLocal, backendReady };'
+        ? '\n;globalThis.__popupTest = { openRemoteDraft, sendToLocal, backendReady, getBackendUrl };'
         : '';
     vm.runInContext(source + suffix, context, { filename: file });
   }
 
   return { ...context.__popupTest, elements, createdTabs };
 }
+
+test('no stored backend URL falls back to the deployed Worker URL', async () => {
+  const { getBackendUrl } = loadPopup({ backendUrl: null });
+  assert.equal(await getBackendUrl(), WORKER_URL);
+});
+
+test('an explicitly saved backend URL is not replaced by the default', async () => {
+  const { getBackendUrl } = loadPopup({ backendUrl: LOCAL_URL });
+  assert.equal(await getBackendUrl(), LOCAL_URL);
+});
 
 test('remote submissions open the dashboard in a foreground tab', async () => {
   const { openRemoteDraft, backendReady, elements, createdTabs } = loadPopup();

@@ -10,8 +10,9 @@
     <main>
       <h1>BIFM settings</h1>
       <p class="intro">
-        Choose which dashboard receives shopping requests. The default is your computer; enter a
-        Cloudflare Worker URL to use the online dashboard from any device.
+        Choose which dashboard receives shopping requests. The online Cloudflare Worker at
+        <code>https://buy-this-for-me.m-vaz-mota.workers.dev</code> is the default. Switch to the
+        local server only when you are developing on this computer.
       </p>
 
       <form id="settings-form" novalidate>
@@ -22,7 +23,7 @@
           type="url"
           spellcheck="false"
           autocomplete="off"
-          placeholder="http://127.0.0.1:3000"
+          placeholder="https://buy-this-for-me.m-vaz-mota.workers.dev"
           required
         />
         <p id="backend-error" class="field-error" role="alert" hidden></p>
@@ -32,11 +33,11 @@
       </form>
 
       <section class="notes">
-        <h2>Online dashboard</h2>
+        <h2>Online dashboard (default)</h2>
         <p>
-          Use the root URL of your Worker, for example
-          <code>https://buy-this-for-me.your-name.workers.dev</code>. Do not add <code>/api</code>,
-          a query string, or a password.
+          The extension uses <code>https://buy-this-for-me.m-vaz-mota.workers.dev</code> unless you
+          save a different URL here. Use the Worker root URL, with no <code>/api</code> path, query
+          string, or password.
         </p>
         <p>
           When the configured URL is remote, the extension opens the dashboard in a new tab and
@@ -44,10 +45,11 @@
           request is submitted once after login. The extension never stores the app password.
         </p>
 
-        <h2>Local server</h2>
+        <h2>Local server (optional)</h2>
         <p>
-          Keep <code>http://127.0.0.1:3000</code> to post directly to the local server started with
-          <code>npm start</code>. Local mode does not ask for a password.
+          For local development, save <code>http://127.0.0.1:3000</code> to post directly to the
+          server started with <code>npm start</code>. Local mode is never used automatically: it
+          requires setting the URL explicitly here. Local mode does not ask for a password.
         </p>
       </section>
     </main>

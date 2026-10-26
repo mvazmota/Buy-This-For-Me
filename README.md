@@ -1,13 +1,17 @@
 # BIFM shopping requests
 
 A small family shopping list that starts from the page you are viewing: an Edge extension
-sends the current tab's title and link to a dashboard. The dashboard runs either on your own
-PC (local prototype) or on Cloudflare Workers with D1 storage and a shared app password.
+sends the current tab's title and link to a dashboard. The dashboard runs online on Cloudflare
+Workers with D1 storage, or on your own PC as a local development prototype. The extension
+sends to the deployed Worker at `https://buy-this-for-me.m-vaz-mota.workers.dev` by default;
+the local server is an explicit opt-in for development.
 
-- **Local mode:** `npm start`, no password, data in `data/requests.json`. Binds to `127.0.0.1`
-  only. Never expose it to the internet.
-- **Online mode:** Cloudflare Worker + D1 + static dashboard from `public/`, protected by the
-  `APP_PASSWORD` Worker secret. HTTPS only on `workers.dev`.
+- **Online mode (default):** Cloudflare Worker + D1 + static dashboard from `public/`,
+  protected by the `APP_PASSWORD` Worker secret. HTTPS only on `workers.dev`. The extension
+  opens the dashboard in a new tab and hands the request over after login.
+- **Local mode (optional):** `npm start`, no password, data in `data/requests.json`. Binds to
+  `127.0.0.1` only. Never expose it to the internet. Requires saving
+  `http://127.0.0.1:3000` in the extension settings.
 - No accounts, no npm framework, no build step for the dashboard. Wrangler is the only
   development dependency and is needed only for Cloudflare work.
 - Tested with Node.js v24.21.0 on Windows 11. The local server needs Node 18+; Wrangler
@@ -32,7 +36,10 @@ test/worker.test.js          Worker auth/API tests using a fake D1
 data/requests.json           created automatically on first local save (ignored by git)
 ```
 
-## 1. Start the local server
+## 1. Start the local server (optional, for development)
+
+Skip this section if you only use the online Worker (the extension default). Run it when you
+want to develop or test against a local dashboard.
 
 1. Open **PowerShell**.
 2. Change to this project folder:
@@ -55,16 +62,18 @@ Leave that PowerShell window open while you use the extension. Press `Ctrl+C` to
 `npm start` and `npm test` use only Node built-ins. `npm install` is only needed for Wrangler
 and the Cloudflare steps.
 
-Local mode never asks for a password. The shared dashboard still calls `/api/session`,
-`/api/login` and `/api/logout`; against the local server those endpoints always report an
-authenticated session and login/logout succeed, so the old local workflow is unchanged.
+The extension sends to the online Worker by default. To use this local server you must explicitly
+set the backend URL to `http://127.0.0.1:3000` in the extension settings (section 2). Local mode
+never asks for a password. The shared dashboard still calls `/api/session`, `/api/login` and
+`/api/logout`; against the local server those endpoints always report an authenticated session
+and login/logout succeed, so the old local workflow is unchanged.
 
 ### Different local port
 
-The extension defaults to port **3000** and only has host permission for port 3000. Staying on
-3000 is simplest. If you must change it, update the host permissions in
-`extension/manifest.json` to the new port and enter the matching URL in the extension
-settings. The local server binds to loopback only.
+When you use local mode, the extension expects port **3000** and the manifest only has host
+permission for port 3000. Staying on 3000 is simplest. If you must change it, update the host
+permissions in `extension/manifest.json` to the new port and enter the matching URL in the
+extension settings. The local server binds to loopback only.
 
 ## 2. Load the extension in Edge
 
@@ -77,8 +86,10 @@ settings. The local server binds to loopback only.
 6. Open a normal product page (`http://` or `https://`), click the extension icon. The popup
    pre-fills the page title and link.
 7. Edit the title if needed, set quantity (default 1), add an optional note, then click
-   **Send request**.
-8. Open the dashboard to see it.
+   **Send request**. By default this opens the online Worker dashboard in a new tab; log in
+   there if prompted and the request is submitted once. See below to switch to the local
+   server.
+8. Open the dashboard to see it. The popup footer links to the configured dashboard.
 
 After editing extension files, return to `edge://extensions` and click the extension's
 **Reload** icon. Reloading the extension also closes an open popup.
@@ -90,8 +101,13 @@ Open the extension's **Settings** (extension options) from the popup footer or f
 
 | Backend URL | Behaviour |
 | --- | --- |
-| `http://127.0.0.1:3000` (default) | Posts directly to the local server, as before. No password. |
-| `https://buy-this-for-me.<your-subdomain>.workers.dev` | Opens the online dashboard in a new foreground tab and hands over the request in the URL fragment. You log in on the dashboard if prompted; the request is submitted once after login. |
+| `https://buy-this-for-me.m-vaz-mota.workers.dev` (default) | Opens the online dashboard in a new foreground tab and hands over the request in the URL fragment. You log in on the dashboard if prompted; the request is submitted once after login. |
+| `http://127.0.0.1:3000` | Explicit local override. Posts directly to the local server started with `npm start`. No password. |
+
+The extension uses the deployed Worker when no backend URL is saved. Saving a value replaces
+that fallback for this browser profile; the extension never overwrites an explicitly saved
+URL on its own. To return to the online Worker, save
+`https://buy-this-for-me.m-vaz-mota.workers.dev` again.
 
 Rules for the setting:
 
@@ -145,8 +161,9 @@ Changing the Worker or redeploying does not clear D1.
 
 ## 5. HTTP API
 
-All responses are JSON. Local base URL: `http://127.0.0.1:3000`. Online base URL: your Worker
-URL. Calls must be same-origin; cross-origin API requests are rejected by the Worker.
+All responses are JSON. Local base URL: `http://127.0.0.1:3000`. Online base URL:
+`https://buy-this-for-me.m-vaz-mota.workers.dev`. Calls must be same-origin; cross-origin API
+requests are rejected by the Worker.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
@@ -210,7 +227,9 @@ npx wrangler deploy --dry-run
 
 ## 7. Deploy to Cloudflare Workers
 
-This repository is configured for a Worker named `buy-this-for-me`. The Worker handles
+This repository is configured for a Worker named `buy-this-for-me`. The deployed URL is
+`https://buy-this-for-me.m-vaz-mota.workers.dev`, which is also the extension's default
+backend. The Worker handles
 `/api/*` first, stores requests in D1, and serves the existing dashboard files from `public/`
 through the `ASSETS` binding. `workers.dev` is enabled.
 
@@ -273,9 +292,8 @@ idempotent (`IF NOT EXISTS`). When you add a new migration file, apply it with t
 npx wrangler deploy
 ```
 
-The command prints the deployed URL, typically
-`https://buy-this-for-me.<your-subdomain>.workers.dev`. The Worker now exists, but login is
-still unavailable until the secret is set in step 7.5.
+The command prints the deployed URL, `https://buy-this-for-me.m-vaz-mota.workers.dev`. The
+Worker now exists, but login is still unavailable until the secret is set in step 7.5.
 
 If Wrangler complains that the database id is invalid, the placeholder in `wrangler.jsonc` was
 not replaced.
@@ -340,8 +358,10 @@ yourself before pushing code that needs a new one.
 
 ### 7.7 Verify the deployment
 
-1. `GET https://<worker>/api/health` in a browser or with curl should return `{"ok":true}`.
-2. Open `https://<worker>/` in a private window. You should see the login form, not the list.
+1. `GET https://buy-this-for-me.m-vaz-mota.workers.dev/api/health` in a browser or with curl
+   should return `{"ok":true}`.
+2. Open `https://buy-this-for-me.m-vaz-mota.workers.dev/` in a private window. You should see
+   the login form, not the list.
 3. Log in with `APP_PASSWORD`. The dashboard should load (empty at first).
 4. Add a request from the dashboard's API or the extension and confirm it appears after a
    refresh and after a Worker redeploy (it lives in D1).
@@ -350,15 +370,18 @@ yourself before pushing code that needs a new one.
 
 ### 7.8 Point the extension at the Worker
 
-1. Open the extension settings.
-2. Enter the Worker root URL, e.g. `https://buy-this-for-me.<your-subdomain>.workers.dev`.
-3. Save, then submit a request from a product page.
-4. A new dashboard tab opens in the foreground with the draft. Log in if prompted; the
+The extension already uses `https://buy-this-for-me.m-vaz-mota.workers.dev` by default, so no
+setting is needed unless you previously saved another URL.
+
+1. Open the extension settings and check the Dashboard URL. If you saved the local URL while
+   developing, replace it with `https://buy-this-for-me.m-vaz-mota.workers.dev` and save.
+2. Submit a request from a product page.
+3. A new dashboard tab opens in the foreground with the draft. Log in if prompted; the
    request submits once and the fragment is cleared. A refresh afterwards must not post it
    again.
 
-Do not configure the extension with the local `http://127.0.0.1:3000` URL while expecting it
-to reach the online Worker. Local URLs always use the direct local POST path.
+Local mode is opt-in: save `http://127.0.0.1:3000` to use the direct local POST path. A local
+URL never reaches the online Worker.
 
 ## 8. Security and limitations
 
@@ -385,7 +408,8 @@ to reach the online Worker. Local URLs always use the direct local POST path.
 
 | Symptom | Fix |
 | --- | --- |
-| Popup says it cannot reach `http://127.0.0.1:3000` | Start the local server (`npm start`) and keep that window open. |
+| Popup says it cannot reach `http://127.0.0.1:3000` (local override) | Start the local server (`npm start`) and keep that window open. |
+| Requests open the online dashboard but you wanted the local server | Save `http://127.0.0.1:3000` in the extension settings. The Worker is the default. |
 | `Port 3000 is already in use` | Stop the other process. The extension only supports port 3000 without a manifest change. |
 | Dashboard shows "Could not load requests" | Local: server stopped or wrong port. Online: check the Worker URL and login. Press Refresh. |
 | Online dashboard shows the login form after working | The 7-day session expired or the secret was rotated. Log in again. |
