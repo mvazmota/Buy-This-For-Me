@@ -6,6 +6,10 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 
+const ROOT = path.join(__dirname, '..');
+const ICON_SIZES = [16, 32, 48, 128];
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
 const REMOTE_URL = 'https://buy-this-for-me.example.workers.dev';
 const WORKER_URL = 'https://buy-this-for-me.m-vaz-mota.workers.dev';
 const LOCAL_URL = 'http://127.0.0.1:3000';
@@ -164,4 +168,43 @@ test('local submissions still post directly and open no tab', async () => {
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, `${LOCAL_URL}/api/requests`);
   assert.equal(calls[0].options.method, 'POST');
+});
+
+test('manifest declares PNG icons and toolbar icons that exist', () => {
+  const manifest = JSON.parse(
+    fs.readFileSync(path.join(ROOT, 'extension', 'manifest.json'), 'utf8'),
+  );
+
+  assert.ok(manifest.icons, 'manifest.icons is missing');
+  assert.ok(manifest.action && manifest.action.default_icon, 'action.default_icon is missing');
+
+  for (const size of ICON_SIZES) {
+    for (const declared of [manifest.icons, manifest.action.default_icon]) {
+      const relative = declared[String(size)];
+      assert.equal(relative, `icons/icon-${size}.png`);
+      const file = path.join(ROOT, 'extension', relative);
+      assert.ok(fs.existsSync(file), `${relative} does not exist`);
+
+      const bytes = fs.readFileSync(file);
+      assert.ok(bytes.subarray(0, 8).equals(PNG_SIGNATURE), `${relative} is not a PNG`);
+      assert.equal(bytes.subarray(12, 16).toString('ascii'), 'IHDR');
+      assert.equal(bytes.readUInt32BE(16), size, `${relative} has the wrong width`);
+      assert.equal(bytes.readUInt32BE(20), size, `${relative} has the wrong height`);
+    }
+  }
+});
+
+test('dashboard HTML links the SVG favicon and the file exists', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'public', 'index.html'), 'utf8');
+  assert.match(
+    html,
+    /<link\s+rel="icon"\s+href="\/favicon\.svg"\s+type="image\/svg\+xml"\s*\/?>/i,
+  );
+
+  const favicon = path.join(ROOT, 'public', 'favicon.svg');
+  assert.ok(fs.existsSync(favicon), 'public/favicon.svg does not exist');
+  const svg = fs.readFileSync(favicon, 'utf8');
+  assert.match(svg, /^<svg\b/);
+  assert.match(svg, /viewBox="0 0 64 64"/);
+  assert.match(svg, /fill="#2563eb"/);
 });

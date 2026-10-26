@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Shopping cart">
+  <rect width="64" height="64" rx="14.08" fill="#2563eb"/>
+  <path d="M8.32 17.92 L17.28 17.92 L20.48 23.68" fill="none" stroke="#ffffff" stroke-width="3.52" stroke-linecap="round" stroke-linejoin="round"/>
+  <polygon points="19.2 23.68 55.68 23.68 48.64 40.32 26.24 40.32" fill="#ffffff"/>
+  <circle cx="29.44" cy="49.28" r="3.52" fill="#ffffff"/>
+  <circle cx="46.72" cy="49.28" r="3.52" fill="#ffffff"/>
+</svg>
