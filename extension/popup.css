@@ -140,6 +140,20 @@ form {
   margin-top: 0;
 }
 
+/* Quantity and price share one row; each keeps its own label and messages.
+   auto-fit with a minimum column width stacks them on very narrow popups. */
+.field-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 11px 10px;
+  margin-top: 11px;
+}
+
+.field-row > .field {
+  min-width: 0;
+  margin-top: 0;
+}
+
 label {
   display: block;
   margin-bottom: 5px;
