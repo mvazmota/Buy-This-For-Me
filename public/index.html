@@ -9,9 +9,12 @@
   </head>
   <body>
     <header class="page-header">
-      <div>
-        <h1>Shopping requests</h1>
-        <p class="subtitle">Family shopping list</p>
+      <div class="brand">
+        <img class="brand-mark" src="/favicon.svg" alt="" width="40" height="40" />
+        <div>
+          <h1>Shopping requests</h1>
+          <p class="subtitle">Family shopping list</p>
+        </div>
       </div>
       <div class="header-actions">
         <span id="last-updated" class="muted" aria-live="polite"></span>
@@ -40,11 +43,72 @@
     </section>
 
     <main id="app-view" hidden>
-      <p id="summary" class="summary" hidden></p>
+      <dl id="summary" class="stats" aria-label="Request summary" hidden>
+        <div class="stat">
+          <dt>Total</dt>
+          <dd id="stat-total">0</dd>
+        </div>
+        <div class="stat stat-open">
+          <dt>Open</dt>
+          <dd id="stat-open">0</dd>
+        </div>
+        <div class="stat stat-purchased">
+          <dt>Purchased</dt>
+          <dd id="stat-purchased">0</dd>
+        </div>
+      </dl>
+
+      <section id="controls" class="controls" aria-label="Search, filter, and sort requests" hidden>
+        <div class="controls-row">
+          <div class="field field-search">
+            <label for="search">Search</label>
+            <input
+              id="search"
+              type="search"
+              placeholder="Title, note, or URL"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </div>
+          <div class="field field-sort">
+            <label for="sort">Sort by</label>
+            <select id="sort">
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+              <option value="title">Title A–Z</option>
+              <option value="quantity">Quantity (high to low)</option>
+              <option value="status">Status</option>
+            </select>
+          </div>
+          <button id="clear-filters" type="button" class="button button-quiet" hidden>
+            Clear filters
+          </button>
+        </div>
+
+        <div id="status-filters" class="chips" role="group" aria-label="Filter by status">
+          <button type="button" class="chip" data-status="all" aria-pressed="true">
+            All <span class="chip-count">0</span>
+          </button>
+          <button type="button" class="chip" data-status="New" aria-pressed="false">
+            New <span class="chip-count">0</span>
+          </button>
+          <button type="button" class="chip" data-status="Purchased" aria-pressed="false">
+            Purchased <span class="chip-count">0</span>
+          </button>
+          <button type="button" class="chip" data-status="Done" aria-pressed="false">
+            Done <span class="chip-count">0</span>
+          </button>
+          <button type="button" class="chip" data-status="Not buying" aria-pressed="false">
+            Not buying <span class="chip-count">0</span>
+          </button>
+        </div>
+      </section>
+
       <div id="list" class="request-list" aria-live="polite"></div>
       <p id="empty" class="empty" hidden>
         No requests yet. Open a product page and use the extension to add one.
       </p>
+      <p id="empty-filtered" class="empty" hidden>No requests match these filters</p>
       <p id="loading" class="muted">Loading requests…</p>
     </main>
 
@@ -52,6 +116,7 @@
       <p>Status changes save immediately.</p>
     </footer>
 
+    <script src="/list-utils.js"></script>
     <script src="/app.js"></script>
   </body>
 </html>

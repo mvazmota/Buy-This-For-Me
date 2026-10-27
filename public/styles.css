@@ -1,22 +1,72 @@
 :root {
   color-scheme: light;
-  --bg: #f5f6f8;
+  --bg: #f4f6f9;
   --card: #ffffff;
-  --text: #1c2430;
-  --muted: #5d6b7a;
-  --border: #dde2e8;
-  --accent: #1f5f8b;
-  --accent-soft: #e8f1f8;
-  --danger: #a3261f;
+  --text: #18202b;
+  --muted: #5a6878;
+  --border: #dfe4ea;
+  --border-strong: #c6ced8;
+  --accent: #1d5c8a;
+  --accent-strong: #164668;
+  --accent-soft: #e7f0f7;
+  --primary: #1d5c8a;
+  --primary-hover: #164668;
+  --primary-text: #ffffff;
+  --focus: #2b7ab5;
+  --danger: #a12c24;
   --danger-soft: #fdecea;
-  --ok: #1f6b45;
-  --ok-soft: #e8f4ed;
-  --warn: #7a4b00;
-  --warn-soft: #fdf1dc;
+  --ok: #1e6a44;
+  --ok-soft: #e7f4ec;
+  --warn: #7a4a00;
+  --warn-soft: #fdf1da;
+  --neutral: #64707d;
+  --neutral-soft: #eef1f4;
+  --status-new: #2b6cb0;
+  --status-purchased: #c2740b;
+  --status-done: #2f855a;
+  --status-not-buying: #8a949e;
+  --shadow: 0 1px 2px rgba(20, 30, 45, 0.06), 0 4px 14px rgba(20, 30, 45, 0.05);
+  --radius: 12px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg: #12161c;
+    --card: #1a2028;
+    --text: #e8edf3;
+    --muted: #9fadbd;
+    --border: #2b333d;
+    --border-strong: #3b4551;
+    --accent: #7ab3dd;
+    --accent-strong: #a5cdea;
+    --accent-soft: #173042;
+    --primary: #2d6f9f;
+    --primary-hover: #3a82b6;
+    --primary-text: #ffffff;
+    --focus: #8cc6f0;
+    --danger: #f3a29b;
+    --danger-soft: #3a1f1e;
+    --ok: #8fd3ae;
+    --ok-soft: #163025;
+    --warn: #e7bd76;
+    --warn-soft: #362a15;
+    --neutral: #9aa5b1;
+    --neutral-soft: #232a33;
+    --status-new: #63a9e6;
+    --status-purchased: #e0a33a;
+    --status-done: #68c693;
+    --status-not-buying: #8b96a3;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 18px rgba(0, 0, 0, 0.35);
+  }
 }
 
 * {
   box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
 }
 
 body {
@@ -40,27 +90,43 @@ main,
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
   margin-bottom: 16px;
 }
 
+.brand {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+}
+
+.brand-mark {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+}
+
 h1 {
   margin: 0;
-  font-size: 28px;
+  font-size: 26px;
+  line-height: 1.2;
   letter-spacing: -0.02em;
 }
 
 .subtitle {
-  margin: 4px 0 0;
+  margin: 3px 0 0;
   color: var(--muted);
   font-size: 14px;
 }
 
 .header-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .muted {
@@ -76,7 +142,7 @@ textarea {
 }
 
 .button {
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   background: var(--card);
   color: var(--text);
   border-radius: 8px;
@@ -84,7 +150,7 @@ textarea {
   cursor: pointer;
 }
 
-.button:hover {
+.button:hover:not(:disabled) {
   border-color: var(--accent);
   color: var(--accent);
 }
@@ -92,6 +158,19 @@ textarea {
 .button:disabled {
   opacity: 0.6;
   cursor: default;
+}
+
+.button-quiet {
+  color: var(--muted);
+}
+
+.button-quiet:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+:where(a, button, input, select, textarea):focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
 }
 
 .banner {
@@ -123,7 +202,8 @@ textarea {
   padding: 24px;
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
 }
 
 .login-card h2 {
@@ -144,16 +224,11 @@ textarea {
 
 .login-card input {
   width: 100%;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: 8px;
   padding: 9px 11px;
   background: var(--card);
   color: var(--text);
-}
-
-.login-card input:focus {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
 }
 
 .login-error {
@@ -165,22 +240,181 @@ textarea {
 .button-primary {
   width: 100%;
   margin-top: 14px;
-  border-color: var(--accent);
-  background: var(--accent);
-  color: #ffffff;
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--primary-text);
   font-weight: 600;
 }
 
 .button-primary:hover:not(:disabled) {
-  border-color: var(--accent);
-  background: #17496b;
-  color: #ffffff;
+  border-color: var(--primary-hover);
+  background: var(--primary-hover);
+  color: var(--primary-text);
 }
 
-.summary {
-  margin: 0 0 12px;
+.stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0 0 14px;
+}
+
+.stat {
+  padding: 10px 14px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.stat dt {
   color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.stat dd {
+  margin: 2px 0 0;
+  font-size: 22px;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.stat-open dd {
+  color: var(--status-new);
+}
+
+.stat-purchased dd {
+  color: var(--status-purchased);
+}
+
+.controls {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 14px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.controls-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.field label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.field input,
+.field select {
+  min-height: 40px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.field input::placeholder {
+  color: var(--muted);
+  opacity: 0.9;
+}
+
+.field-sort select {
+  min-width: 190px;
+}
+
+.controls-row .button {
+  min-height: 40px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--text);
   font-size: 14px;
+  cursor: pointer;
+}
+
+.chip:hover {
+  border-color: var(--accent);
+}
+
+.chip-count {
+  min-width: 1.4em;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--neutral-soft);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.chip[aria-pressed="true"] {
+  font-weight: 600;
+}
+
+.chip[data-status="all"][aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.chip[data-status="New"][aria-pressed="true"] {
+  border-color: var(--status-new);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.chip[data-status="Purchased"][aria-pressed="true"] {
+  border-color: var(--status-purchased);
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.chip[data-status="Done"][aria-pressed="true"] {
+  border-color: var(--status-done);
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.chip[data-status="Not buying"][aria-pressed="true"] {
+  border-color: var(--status-not-buying);
+  background: var(--neutral-soft);
+  color: var(--text);
+}
+
+.chip[aria-pressed="true"] .chip-count {
+  background: var(--card);
+  color: inherit;
 }
 
 .request-list {
@@ -189,13 +423,31 @@ textarea {
 }
 
 .request-card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 16px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px 24px;
+  gap: 12px 20px;
+  padding: 16px 16px 16px 18px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.request-card[data-status="New"] {
+  border-left-color: var(--status-new);
+}
+
+.request-card[data-status="Purchased"] {
+  border-left-color: var(--status-purchased);
+}
+
+.request-card[data-status="Done"] {
+  border-left-color: var(--status-done);
+}
+
+.request-card[data-status="Not buying"] {
+  border-left-color: var(--status-not-buying);
 }
 
 .request-main {
@@ -214,8 +466,7 @@ textarea {
   text-decoration: none;
 }
 
-.request-title a:hover,
-.request-title a:focus {
+.request-title a:hover {
   text-decoration: underline;
 }
 
@@ -241,45 +492,47 @@ textarea {
   flex-direction: column;
   align-items: flex-end;
   gap: 8px;
+  min-width: 150px;
 }
 
 .qty {
   display: inline-block;
   padding: 2px 10px;
   border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: var(--neutral-soft);
+  color: var(--muted);
   font-size: 13px;
   font-weight: 600;
   white-space: nowrap;
 }
 
 .status-select {
-  border: 1px solid var(--border);
+  min-width: 140px;
+  border: 1px solid var(--border-strong);
   border-radius: 8px;
   padding: 6px 10px;
   background: var(--card);
-  min-width: 140px;
+  color: var(--text);
 }
 
 .status-select[data-status="New"] {
-  border-color: #9cc3de;
+  border-color: var(--status-new);
   background: var(--accent-soft);
 }
 
 .status-select[data-status="Purchased"] {
-  border-color: #e5c98a;
+  border-color: var(--status-purchased);
   background: var(--warn-soft);
 }
 
 .status-select[data-status="Done"] {
-  border-color: #9dceb4;
+  border-color: var(--status-done);
   background: var(--ok-soft);
 }
 
 .status-select[data-status="Not buying"] {
-  border-color: #e0b4af;
-  background: var(--danger-soft);
+  border-color: var(--status-not-buying);
+  background: var(--neutral-soft);
 }
 
 .status-select:disabled {
@@ -295,10 +548,11 @@ textarea {
 }
 
 .empty {
-  background: var(--card);
-  border: 1px dashed var(--border);
-  border-radius: 12px;
+  margin: 0;
   padding: 32px 20px;
+  background: var(--card);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
   text-align: center;
   color: var(--muted);
 }
@@ -309,20 +563,81 @@ textarea {
   font-size: 12px;
 }
 
+.footer p {
+  margin: 0;
+}
+
 @media (max-width: 640px) {
   body {
-    padding: 16px 10px 32px;
+    padding: 16px 12px 32px;
+  }
+
+  h1 {
+    font-size: 22px;
+  }
+
+  .page-header {
+    align-items: flex-start;
+  }
+
+  .header-actions {
+    gap: 8px;
+  }
+
+  .stats {
+    gap: 8px;
+  }
+
+  .stat {
+    padding: 8px 10px;
+  }
+
+  .stat dt {
+    font-size: 11px;
+    letter-spacing: 0.03em;
+  }
+
+  .stat dd {
+    font-size: 18px;
+  }
+
+  .controls-row {
+    grid-template-columns: 1fr;
+  }
+
+  .field-sort select {
+    min-width: 0;
+  }
+
+  .controls-row .button {
+    justify-self: start;
+  }
+
+  .chip {
+    padding: 5px 10px;
+    font-size: 13px;
   }
 
   .request-card {
     grid-template-columns: 1fr;
+    padding: 14px 14px 14px 16px;
   }
 
   .request-side {
-    align-items: stretch;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    min-width: 0;
+  }
+
+  .status-select {
+    flex: 1 1 140px;
+    min-width: 0;
   }
 
   .status-error {
+    flex-basis: 100%;
     max-width: none;
     text-align: left;
   }

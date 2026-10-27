@@ -1,0 +1,167 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const test = require('node:test');
+
+const { filterAndSortRequests } = require('../public/list-utils');
+
+// Input order mimics the API: newest first, with deliberate ties.
+const REQUESTS = [
+  {
+    id: 'a',
+    title: 'Milk',
+    note: 'Semi-skimmed',
+    url: 'https://shop.example/milk',
+    quantity: 2,
+    status: 'New',
+    submittedAt: '2026-01-01T10:00:00.000Z',
+  },
+  {
+    id: 'b',
+    title: 'bread',
+    note: '',
+    url: 'https://bakery.example/loaf',
+    quantity: 1,
+    status: 'Purchased',
+    submittedAt: '2026-01-02T10:00:00.000Z',
+  },
+  {
+    id: 'c',
+    title: 'Apples',
+    note: 'Green apples',
+    url: 'https://market.example/apples',
+    quantity: 3,
+    status: 'Done',
+    submittedAt: '2026-01-03T10:00:00.000Z',
+  },
+  {
+    id: 'd',
+    title: 'Batteries',
+    note: 'AA',
+    url: 'https://tech.example/aa',
+    quantity: 1,
+    status: 'Not buying',
+    submittedAt: '2026-01-04T10:00:00.000Z',
+  },
+  {
+    id: 'e',
+    title: 'apples',
+    note: 'red',
+    url: 'https://market.example/red',
+    quantity: 3,
+    status: 'New',
+    submittedAt: '2026-01-05T10:00:00.000Z',
+  },
+];
+
+function ids(items) {
+  return items.map((item) => item.id);
+}
+
+test('defaults to newest first', () => {
+  assert.deepEqual(ids(filterAndSortRequests(REQUESTS)), ['e', 'd', 'c', 'b', 'a']);
+});
+
+test('sorts oldest first', () => {
+  assert.deepEqual(ids(filterAndSortRequests(REQUESTS, { sort: 'oldest' })), [
+    'a',
+    'b',
+    'c',
+    'd',
+    'e',
+  ]);
+});
+
+test('sorts title A-Z case-insensitively and keeps ties stable', () => {
+  assert.deepEqual(ids(filterAndSortRequests(REQUESTS, { sort: 'title' })), [
+    'c',
+    'e',
+    'd',
+    'b',
+    'a',
+  ]);
+});
+
+test('sorts quantity high to low and keeps ties stable', () => {
+  assert.deepEqual(ids(filterAndSortRequests(REQUESTS, { sort: 'quantity' })), [
+    'c',
+    'e',
+    'a',
+    'b',
+    'd',
+  ]);
+});
+
+test('sorts status in workflow order and keeps ties stable', () => {
+  assert.deepEqual(ids(filterAndSortRequests(REQUESTS, { sort: 'status' })), [
+    'a',
+    'e',
+    'b',
+    'c',
+    'd',
+  ]);
+});
+
+test('search matches title, note, and URL case-insensitively and trims', () => {
+  assert.deepEqual(ids(filterAndSortRequests(REQUESTS, { query: 'APPLES' })), ['e', 'c']);
+  assert.deepEqual(ids(filterAndSortRequests(REQUESTS, { query: '  green  ' })), ['c']);
+  assert.deepEqual(ids(filterAndSortRequests(REQUESTS, { query: 'bakery' })), ['b']);
+  assert.deepEqual(ids(filterAndSortRequests(REQUESTS, { query: 'AA' })), ['d']);
+  assert.deepEqual(ids(filterAndSortRequests(REQUESTS, { query: '  milk  ' })), ['a']);
+});
+
+test('status filter keeps only the requested status', () => {
+  assert.deepEqual(ids(filterAndSortRequests(REQUESTS, { status: 'New' })), ['e', 'a']);
+  assert.deepEqual(ids(filterAndSortRequests(REQUESTS, { status: 'Purchased' })), ['b']);
+  assert.deepEqual(ids(filterAndSortRequests(REQUESTS, { status: 'Not buying' })), ['d']);
+  assert.deepEqual(ids(filterAndSortRequests(REQUESTS, { status: 'all' })), [
+    'e',
+    'd',
+    'c',
+    'b',
+    'a',
+  ]);
+  assert.deepEqual(filterAndSortRequests(REQUESTS, { status: 'Nope' }), []);
+});
+
+test('combines search, status, and sort options', () => {
+  assert.deepEqual(
+    ids(filterAndSortRequests(REQUESTS, { query: 'apples', status: 'New', sort: 'oldest' })),
+    ['e']
+  );
+  assert.deepEqual(
+    ids(filterAndSortRequests(REQUESTS, { query: 'market', status: 'Done', sort: 'title' })),
+    ['c']
+  );
+});
+
+test('returns an empty array when nothing matches', () => {
+  assert.deepEqual(filterAndSortRequests(REQUESTS, { query: 'no-such-thing' }), []);
+  assert.deepEqual(filterAndSortRequests([], { query: 'milk' }), []);
+});
+
+test('does not mutate the input array or its objects', () => {
+  const before = ids(REQUESTS);
+  const snapshot = JSON.stringify(REQUESTS);
+
+  const sorted = filterAndSortRequests(REQUESTS, { sort: 'quantity' });
+  const filtered = filterAndSortRequests(REQUESTS, { query: 'apples', sort: 'title' });
+
+  assert.notEqual(sorted, REQUESTS);
+  assert.notEqual(filtered, REQUESTS);
+  assert.deepEqual(ids(REQUESTS), before);
+  assert.equal(JSON.stringify(REQUESTS), snapshot);
+});
+
+test('handles unknown sorts, missing options, and non-array input', () => {
+  assert.deepEqual(ids(filterAndSortRequests(REQUESTS, { sort: 'sideways' })), [
+    'e',
+    'd',
+    'c',
+    'b',
+    'a',
+  ]);
+  assert.deepEqual(ids(filterAndSortRequests(REQUESTS)), ['e', 'd', 'c', 'b', 'a']);
+  assert.deepEqual(filterAndSortRequests(null), []);
+  assert.deepEqual(filterAndSortRequests(undefined, undefined), []);
+});

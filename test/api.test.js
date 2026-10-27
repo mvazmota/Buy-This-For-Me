@@ -264,6 +264,12 @@ test('dashboard is served and path traversal is blocked', async () => {
     assert.equal(css.status, 200);
     assert.match(css.headers.get('content-type'), /text\/css/);
 
+    for (const pathname of ['/app.js', '/list-utils.js']) {
+      const script = await fetch(`${base}${pathname}`);
+      assert.equal(script.status, 200, `${pathname} should be served`);
+      assert.match(script.headers.get('content-type'), /javascript/, `${pathname} content type`);
+    }
+
     const traversal = await new Promise((resolve, reject) => {
       const req = http.request(
         { hostname: '127.0.0.1', port: new URL(base).port, path: '/%2e%2e/server.js' },

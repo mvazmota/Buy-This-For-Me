@@ -2,12 +2,24 @@
 
 const STATUSES = ['New', 'Purchased', 'Done', 'Not buying'];
 const REFRESH_MS = 15000;
+const STORAGE_KEY = 'bifm.dashboard.list-state.v1';
+const DEFAULT_STATE = Object.freeze({ query: '', status: 'all', sort: 'newest' });
+const SORT_VALUES = ['newest', 'oldest', 'title', 'quantity', 'status'];
 
 const listEl = document.getElementById('list');
 const emptyEl = document.getElementById('empty');
+const emptyFilteredEl = document.getElementById('empty-filtered');
 const loadingEl = document.getElementById('loading');
 const bannerEl = document.getElementById('banner');
 const summaryEl = document.getElementById('summary');
+const statTotalEl = document.getElementById('stat-total');
+const statOpenEl = document.getElementById('stat-open');
+const statPurchasedEl = document.getElementById('stat-purchased');
+const controlsEl = document.getElementById('controls');
+const searchInput = document.getElementById('search');
+const sortSelect = document.getElementById('sort');
+const clearFiltersButton = document.getElementById('clear-filters');
+const chipButtons = Array.from(document.querySelectorAll('.chip'));
 const refreshButton = document.getElementById('refresh');
 const lastUpdatedEl = document.getElementById('last-updated');
 const logoutButton = document.getElementById('logout');
@@ -20,6 +32,39 @@ const passwordInput = document.getElementById('password');
 
 let refreshTimer = null;
 let authRequired = true;
+let allRequests = [];
+let lastPayload = '';
+let listState = readStoredState();
+
+function readStoredState() {
+  try {
+    const raw = window.sessionStorage.getItem(STORAGE_KEY);
+    if (!raw) return { ...DEFAULT_STATE };
+    const parsed = JSON.parse(raw);
+    return {
+      query: typeof parsed.query === 'string' ? parsed.query.slice(0, 200) : '',
+      status:
+        parsed.status === 'all' || STATUSES.includes(parsed.status) ? parsed.status : 'all',
+      sort: SORT_VALUES.includes(parsed.sort) ? parsed.sort : 'newest',
+    };
+  } catch {
+    // Storage can be unavailable (private mode, blocked cookies); fall back to
+    // in-memory filtering.
+    return { ...DEFAULT_STATE };
+  }
+}
+
+function saveStoredState() {
+  try {
+    window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(listState));
+  } catch {
+    // Filtering still works for this page view without sessionStorage.
+  }
+}
+
+function hasActiveFilters() {
+  return listState.query.trim() !== '' || listState.status !== 'all';
+}
 
 function showBanner(message, kind = 'error') {
   bannerEl.textContent = message;
@@ -59,12 +104,16 @@ function stopRefresh() {
   refreshTimer = null;
 }
 
+function isEditing() {
+  const active = document.activeElement;
+  if (!active || !appView.contains(active)) return false;
+  return active.matches('input, select, textarea');
+}
+
 function startRefresh() {
   stopRefresh();
   refreshTimer = window.setInterval(() => {
-    if (document.activeElement && document.activeElement.classList.contains('status-select')) {
-      return;
-    }
+    if (isEditing()) return;
     loadRequests({ silent: true });
   }, REFRESH_MS);
 }
@@ -82,6 +131,8 @@ function showApp() {
 function showLogin({ message = '', kind = 'info' } = {}) {
   stopRefresh();
   authRequired = true;
+  allRequests = [];
+  lastPayload = '';
   appView.hidden = true;
   loginView.hidden = false;
   refreshButton.hidden = true;
@@ -89,7 +140,9 @@ function showLogin({ message = '', kind = 'info' } = {}) {
   lastUpdatedEl.textContent = '';
   listEl.replaceChildren();
   summaryEl.hidden = true;
+  controlsEl.hidden = true;
   emptyEl.hidden = true;
+  emptyFilteredEl.hidden = true;
   loadingEl.hidden = true;
 
   if (message) {
@@ -179,6 +232,7 @@ function buildCard(request) {
   const card = document.createElement('article');
   card.className = 'request-card';
   card.dataset.id = request.id;
+  card.dataset.status = request.status;
 
   const main = document.createElement('div');
   main.className = 'request-main';
@@ -277,28 +331,74 @@ function buildCard(request) {
   return card;
 }
 
-function render(requests) {
-  listEl.replaceChildren();
-  summaryEl.hidden = requests.length === 0;
-  emptyEl.hidden = requests.length !== 0;
+function updateFilterCounts() {
+  const queryMatches = BIFMList.filterAndSortRequests(allRequests, {
+    query: listState.query,
+    status: 'all',
+    sort: 'newest',
+  });
+
+  const counts = { all: queryMatches.length, New: 0, Purchased: 0, Done: 0, 'Not buying': 0 };
+  for (const request of queryMatches) {
+    if (Object.prototype.hasOwnProperty.call(counts, request.status)) {
+      counts[request.status] += 1;
+    }
+  }
+
+  for (const chip of chipButtons) {
+    const status = chip.dataset.status;
+    const countEl = chip.querySelector('.chip-count');
+    if (!countEl) continue;
+    countEl.textContent = String(status === 'all' ? counts.all : counts[status] || 0);
+  }
+}
+
+function syncControls() {
+  // Do not overwrite the field while the user is typing in it.
+  if (document.activeElement !== searchInput) {
+    searchInput.value = listState.query;
+  }
+  sortSelect.value = listState.sort;
+
+  for (const chip of chipButtons) {
+    chip.setAttribute('aria-pressed', String(chip.dataset.status === listState.status));
+  }
+
+  clearFiltersButton.hidden = !hasActiveFilters();
+}
+
+function render() {
+  const visible = BIFMList.filterAndSortRequests(allRequests, listState);
+  const hasAny = allRequests.length > 0;
+
+  summaryEl.hidden = !hasAny;
+  controlsEl.hidden = !hasAny;
+  emptyEl.hidden = hasAny;
+  emptyFilteredEl.hidden = !(hasAny && visible.length === 0);
   loadingEl.hidden = true;
 
-  const open = requests.filter((request) => request.status === 'New').length;
-  summaryEl.textContent =
-    requests.length === 1
-      ? `1 request · ${open} marked New`
-      : `${requests.length} requests · ${open} marked New`;
+  statTotalEl.textContent = String(allRequests.length);
+  statOpenEl.textContent = String(
+    allRequests.filter((request) => request.status === 'New').length
+  );
+  statPurchasedEl.textContent = String(
+    allRequests.filter((request) => request.status === 'Purchased').length
+  );
 
-  for (const request of requests) {
+  updateFilterCounts();
+  syncControls();
+
+  listEl.replaceChildren();
+  for (const request of visible) {
     listEl.appendChild(buildCard(request));
   }
 }
 
 async function loadRequests({ silent = false } = {}) {
-  if (!silent) {
+  if (!silent && allRequests.length === 0) {
     loadingEl.hidden = false;
-    refreshButton.disabled = true;
   }
+  if (!silent) refreshButton.disabled = true;
 
   try {
     const response = await fetch('/api/requests', { cache: 'no-store' });
@@ -315,8 +415,14 @@ async function loadRequests({ silent = false } = {}) {
     if (!Array.isArray(data.requests)) {
       throw new Error('Unexpected response from server.');
     }
+
     hideBanner();
-    render(data.requests);
+    const payload = JSON.stringify(data.requests);
+    if (payload !== lastPayload) {
+      allRequests = data.requests;
+      lastPayload = payload;
+      render();
+    }
     lastUpdatedEl.textContent = `Updated ${new Date().toLocaleTimeString()}`;
     loadingEl.hidden = true;
   } catch (err) {
@@ -354,8 +460,38 @@ async function checkSession() {
 }
 
 async function init() {
+  syncControls();
   await checkSession();
 }
+
+searchInput.addEventListener('input', () => {
+  listState.query = searchInput.value;
+  saveStoredState();
+  render();
+});
+
+sortSelect.addEventListener('change', () => {
+  listState.sort = SORT_VALUES.includes(sortSelect.value) ? sortSelect.value : 'newest';
+  saveStoredState();
+  render();
+});
+
+for (const chip of chipButtons) {
+  chip.addEventListener('click', () => {
+    if (listState.status === chip.dataset.status) return;
+    listState.status = chip.dataset.status;
+    saveStoredState();
+    render();
+  });
+}
+
+clearFiltersButton.addEventListener('click', () => {
+  listState = { ...listState, query: '', status: 'all' };
+  saveStoredState();
+  searchInput.value = '';
+  render();
+  searchInput.focus();
+});
 
 loginForm.addEventListener('submit', handleLogin);
 refreshButton.addEventListener('click', () => loadRequests());
