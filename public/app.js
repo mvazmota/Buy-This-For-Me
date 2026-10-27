@@ -569,6 +569,9 @@ function buildCard(request) {
   } else {
     title.textContent = request.title;
   }
+  // The card title is visually truncated; expose the full text on hover.
+  const titleText = title.querySelector('a') || title;
+  if (!titleText.title) titleText.title = request.title;
   main.appendChild(title);
 
   const meta = document.createElement('p');

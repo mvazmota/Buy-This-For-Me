@@ -1,9 +1,22 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
 
 const { filterAndSortRequests, formatPrice, removeRequestById } = require('../public/list-utils');
+
+const STYLES_CSS = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
+const APP_JS = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+
+// Returns the declaration block of a top-level rule such as `.request-title { ... }`.
+function cssRule(selector) {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = STYLES_CSS.match(new RegExp(`(?:^|\\n)${escaped}\\s*\\{([^}]*)\\}`));
+  assert.ok(match, `missing CSS rule for ${selector}`);
+  return match[1];
+}
 
 // Same options as public/list-utils.js; keeps the assertions locale-stable.
 const EURO = new Intl.NumberFormat('pt-PT', {
@@ -241,4 +254,33 @@ test('formatPrice shows euros with two decimals and hides missing prices', () =>
   assert.equal(formatPrice(undefined), '');
   assert.equal(formatPrice(''), '');
   assert.equal(formatPrice('not a price'), '');
+});
+
+test('card title truncates to one line inside a shrinkable column', () => {
+  const titleRule = cssRule('.request-title');
+  assert.match(titleRule, /white-space:\s*nowrap/);
+  assert.match(titleRule, /overflow:\s*hidden/);
+  assert.match(titleRule, /text-overflow:\s*ellipsis/);
+  assert.match(titleRule, /min-width:\s*0/);
+
+  // The grid column holding the title must be allowed to shrink.
+  assert.match(cssRule('.request-main'), /min-width:\s*0/);
+});
+
+test('card title exposes the full text through a title attribute', () => {
+  const cardSource = APP_JS.slice(APP_JS.indexOf('function buildCard('));
+  assert.ok(cardSource.length > 0, 'buildCard not found in public/app.js');
+
+  // Set only when missing, on the link or on the heading itself.
+  assert.match(cardSource, /if\s*\(!\s*[\w$.]+\.title\s*\)/);
+  assert.match(cardSource, /\.title\s*=\s*request\.title/);
+});
+
+test('card notes clamp to three lines without being truncated', () => {
+  const noteRule = cssRule('.note');
+  assert.match(noteRule, /-webkit-line-clamp:\s*3/);
+  assert.match(noteRule, /[\s;]line-clamp:\s*3/);
+  assert.match(noteRule, /-webkit-box-orient:\s*vertical/);
+  assert.match(noteRule, /white-space:\s*pre-wrap/);
+  assert.match(noteRule, /overflow:\s*hidden/);
 });

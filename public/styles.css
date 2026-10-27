@@ -456,9 +456,13 @@ textarea {
 
 .request-title {
   margin: 0;
+  min-width: 0;
+  max-width: 100%;
   font-size: 17px;
   font-weight: 600;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .request-title a {
@@ -470,6 +474,11 @@ textarea {
   text-decoration: underline;
 }
 
+/* Keep the focus ring visible inside the clipped title box. */
+.request-title a:focus-visible {
+  outline-offset: -2px;
+}
+
 .request-meta {
   margin: 6px 0 0;
   color: var(--muted);
@@ -478,6 +487,10 @@ textarea {
 }
 
 .note {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
   margin: 10px 0 0;
   padding: 8px 12px;
   border-left: 3px solid var(--border);
@@ -485,6 +498,7 @@ textarea {
   font-size: 14px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  overflow: hidden;
 }
 
 .request-side {
