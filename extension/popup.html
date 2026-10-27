@@ -24,6 +24,8 @@
 
       <label for="price">Price <span class="optional">(optional)</span></label>
       <input id="price" name="price" type="number" min="0" max="1000000" step="0.01" inputmode="decimal" />
+      <p id="price-display" class="price-display" hidden></p>
+      <p id="price-hint" class="hint" hidden></p>
       <p id="price-error" class="field-error" hidden></p>
 
       <label for="note">Note <span class="optional">(optional)</span></label>
@@ -65,6 +67,7 @@
 
     <script src="settings.js"></script>
     <script src="url-utils.js"></script>
+    <script src="price-extractor.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

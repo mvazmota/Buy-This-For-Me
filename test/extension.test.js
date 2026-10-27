@@ -43,7 +43,13 @@ function createElement() {
  * Run the real extension scripts in a vm context with just enough browser
  * stubs to exercise the popup's submit paths.
  */
-function loadPopup({ backendUrl = REMOTE_URL, appPassword = 'family secret', fetchImpl } = {}) {
+function loadPopup({
+  backendUrl = REMOTE_URL,
+  appPassword = 'family secret',
+  fetchImpl,
+  scriptingPrice = null,
+  denyInjection = false,
+} = {}) {
   const elements = new Map();
   const document = {
     activeElement: null,
@@ -57,6 +63,7 @@ function loadPopup({ backendUrl = REMOTE_URL, appPassword = 'family secret', fet
   };
 
   const createdTabs = [];
+  const injected = [];
   const stored = {};
   if (backendUrl !== null) stored.backendUrl = backendUrl;
   if (appPassword !== null) stored.appPassword = appPassword;
@@ -79,7 +86,17 @@ function loadPopup({ backendUrl = REMOTE_URL, appPassword = 'family secret', fet
         return { id: createdTabs.length, ...options };
       },
       async query() {
-        return [{ title: 'Example product', url: 'https://example.com/product' }];
+        return [{ id: 42, title: 'Example product', url: 'https://example.com/product' }];
+      },
+    },
+    scripting: {
+      async executeScript(options) {
+        injected.push(options);
+        if (denyInjection) throw new Error('Cannot access contents of the page.');
+        // The file injection only loads the extractor; the follow-up func
+        // returns whatever the page "found".
+        if (options.files) return [];
+        return [{ result: scriptingPrice }];
       },
     },
     runtime: {
@@ -100,16 +117,16 @@ function loadPopup({ backendUrl = REMOTE_URL, appPassword = 'family secret', fet
     }),
   });
 
-  for (const file of ['settings.js', 'url-utils.js', 'popup.js']) {
+  for (const file of ['settings.js', 'url-utils.js', 'price-extractor.js', 'popup.js']) {
     const source = fs.readFileSync(path.join(__dirname, '..', 'extension', file), 'utf8');
     const suffix =
       file === 'popup.js'
-        ? '\n;globalThis.__popupTest = { sendToRemote, sendToLocal, backendReady, getBackendUrl, getAppPassword, setAppPassword, submitRequest, confirmDuplicate, cancelDuplicate, checkDuplicate, validate, getPendingPayload: () => pendingPayload };'
+        ? '\n;globalThis.__popupTest = { sendToRemote, sendToLocal, backendReady, getBackendUrl, getAppPassword, setAppPassword, submitRequest, confirmDuplicate, cancelDuplicate, checkDuplicate, validate, prefillFromActiveTab, autoFillPriceFromPage, updatePriceDisplay, getPendingPayload: () => pendingPayload };'
         : '';
     vm.runInContext(source + suffix, context, { filename: file });
   }
 
-  return { ...context.__popupTest, elements, createdTabs, stored };
+  return { ...context.__popupTest, elements, createdTabs, injected, stored };
 }
 
 function flushAsync() {
@@ -481,6 +498,82 @@ test('popup sends price only when provided and validates its format', async () =
   assert.match(context.elements.get('price-error').textContent, /2 decimals/);
 });
 
+test('popup auto-fills an empty price from the page and shows a euro hint', async () => {
+  const context = loadPopup({ scriptingPrice: 12.5 });
+  await context.backendReady;
+  await flushAsync();
+
+  assert.equal(context.elements.get('price').value, '12.50');
+  assert.equal(context.elements.get('price-hint').hidden, false);
+  assert.equal(
+    context.elements.get('price-hint').textContent,
+    'Price found on the page — check it.'
+  );
+  const display = context.elements.get('price-display');
+  assert.equal(display.hidden, false);
+  assert.equal(
+    display.textContent,
+    new Intl.NumberFormat('pt-PT', {
+      style: 'currency',
+      currency: 'EUR',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(12.5)
+  );
+  assert.ok(display.textContent.includes('€'));
+
+  // One canonical extractor: inject the file, then call it from the page.
+  assert.equal(context.injected.length, 2);
+  assert.equal(context.injected[0].files.length, 1);
+  assert.equal(context.injected[0].files[0], 'price-extractor.js');
+  assert.equal(context.injected[0].target.tabId, 42);
+  assert.equal(typeof context.injected[1].func, 'function');
+});
+
+test('auto-fill never overwrites a price the user already typed', async () => {
+  const context = loadPopup({ scriptingPrice: 4 });
+  await context.backendReady;
+  await flushAsync();
+  assert.equal(context.elements.get('price').value, '4.00');
+
+  context.elements.get('price').value = '7.50';
+
+  await context.autoFillPriceFromPage({ id: 42, url: 'https://example.com/product' });
+
+  assert.equal(context.elements.get('price').value, '7.50');
+});
+
+test('auto-fill is silent when no price is found or injection is denied', async () => {
+  const none = loadPopup({ scriptingPrice: null });
+  await none.backendReady;
+  await flushAsync();
+  assert.equal(none.elements.get('price').value, '');
+  assert.equal(none.elements.get('price-hint').textContent, '');
+  assert.equal(none.elements.get('price-display').textContent, '');
+
+  const denied = loadPopup({ denyInjection: true });
+  await denied.backendReady;
+  await flushAsync();
+  assert.equal(denied.elements.get('price').value, '');
+  assert.equal(denied.elements.get('price-hint').textContent, '');
+});
+
+test('auto-fill skips pages that are not http or https', async () => {
+  const context = loadPopup({ scriptingPrice: 9.99 });
+  await context.backendReady;
+  await flushAsync();
+  const before = context.injected.length;
+
+  await context.autoFillPriceFromPage({ id: 1, url: 'edge://extensions/' });
+  await context.autoFillPriceFromPage({ id: 1, url: 'chrome://settings/' });
+  await context.autoFillPriceFromPage({ id: 1, url: 'about:blank' });
+  assert.equal(context.injected.length, before);
+
+  await context.autoFillPriceFromPage({ id: 1, url: 'https://example.com/product' });
+  assert.equal(context.injected.length, before + 2);
+  assert.equal(context.elements.get('price').value, '9.99');
+});
+
 test('manifest declares PNG icons and toolbar icons that exist', () => {
   const manifest = JSON.parse(
     fs.readFileSync(path.join(ROOT, 'extension', 'manifest.json'), 'utf8'),
@@ -512,6 +605,7 @@ test('manifest allows direct Worker and local-server calls without losing storag
 
   assert.ok(manifest.permissions.includes('storage'));
   assert.ok(manifest.permissions.includes('activeTab'));
+  assert.ok(manifest.permissions.includes('scripting'));
   assert.ok(manifest.host_permissions.includes('http://127.0.0.1:3000/*'));
   assert.ok(manifest.host_permissions.includes('http://localhost:3000/*'));
   assert.ok(manifest.host_permissions.includes(`${WORKER_URL}/*`));

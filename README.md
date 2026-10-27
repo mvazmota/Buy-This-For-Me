@@ -32,8 +32,10 @@ wrangler.jsonc               Worker, static assets, D1 and workers.dev config
 public/                      shared dashboard (plain HTML/CSS/JS)
 extension/                   Manifest V3 extension for Edge (load this folder unpacked)
 extension/url-utils.js       canonical URL normalization for the duplicate warning
+extension/price-extractor.js reads a product price from the page; euro price formatting
 test/api.test.js             local API tests using node:test
 test/worker.test.js          Worker auth/API tests using a fake D1
+test/price.test.js           price extraction and euro formatting tests
 data/requests.json           created automatically on first local save (ignored by git)
 ```
 
@@ -87,10 +89,14 @@ extension settings. The local server binds to loopback only.
 6. Open a normal product page (`http://` or `https://`), click the extension icon. The popup
    pre-fills the page title and link.
 7. Edit the title if needed, set quantity (default 1), add an optional price and note, then
-   click **Send request**. By default this sends directly to the online Worker, so save the
-   app password in the extension settings first (section 2). See below to switch to the local
-   server. Before sending, the popup reads the list and warns when the same normalized link
-   is already there; choose **Add anyway** or **Cancel**.
+   click **Send request**. Prices are euros. When the product page exposes a machine-readable
+   price (JSON-LD, `product:price:amount`/`og:price:amount` meta tags, or `itemprop="price"`),
+   the popup fills the empty price field and shows "Price found on the page — check it."
+   **Always check it**: extraction is best effort, it never overwrites a price you typed, and
+   it silently does nothing on pages that expose no price. By default this sends directly to
+   the online Worker, so save the app password in the extension settings first (section 2).
+   See below to switch to the local server. Before sending, the popup reads the list and warns
+   when the same normalized link is already there; choose **Add anyway** or **Cancel**.
 8. Open the dashboard to see it. The popup footer links to the configured dashboard.
 
 After editing extension files, return to `edge://extensions` and click the extension's
@@ -129,10 +135,12 @@ Rules for the settings:
 | --- | --- |
 | `activeTab` | Read the active tab's title and URL only when you click the extension icon. |
 | `storage` | Remember the dashboard URL and the app password chosen in the extension settings. |
+| `scripting` | Inject `price-extractor.js` into the active tab (click-triggered) to read the product price. No broad host permissions are requested. |
 | Host permissions for `http://127.0.0.1:3000/*`, `http://localhost:3000/*` and `https://buy-this-for-me.m-vaz-mota.workers.dev/*` | Allow the popup to POST directly to the local server and to the deployed Worker. |
 
 If a browser-internal page (`edge://`, `chrome://`, extension pages) is active, its link is
-left blank because the API only accepts `http://` and `https://` links.
+left blank because the API only accepts `http://` and `https://` links, and the automatic
+price lookup is skipped.
 
 ## 3. Using the dashboard
 
@@ -141,7 +149,8 @@ left blank because the API only accepts `http://` and `https://` links.
   note, submitted time, and a status menu.
 - **Edit** opens an inline form for title, URL, note, quantity and price. **Save** or
   **Cancel**; field errors appear under the form and match the server limits.
-- Prices display as a plain number with two decimals (no currency symbol) and can be cleared
+- Prices are euros and display with EUR formatting (`pt-PT`, e.g. `12,99 €`) on the card and
+  under the price field while editing. They are stored as plain numbers and can be cleared
   with an empty price field. **Sort by → Price (high to low)** puts unpriced requests last.
 - Statuses save immediately: **New**, **Purchased**, **Done**, **Not buying**.
 - If an update fails, the menu reverts and an error banner explains why.
@@ -196,7 +205,7 @@ Create body:
 Rules: `title` required, 1–200 characters after trimming; `url` required and must parse as
 `http://` or `https://` (max 2048); `note` optional, max 1000 characters; `quantity`
 optional whole number 1–999 (default 1); `price` optional number from 0 to 1000000 with at
-most 2 decimals, stored as `null` when omitted.
+most 2 decimals, stored as `null` when omitted. Prices are euros; no currency field is stored.
 
 `PATCH /api/requests/:id` accepts any subset of `title`, `url`, `note`, `quantity`, `price`
 and `status`, using the same field rules; at least one field is required. `price: null`
@@ -232,10 +241,11 @@ npm test
 npm run check
 ```
 
-`npm test` runs local API tests, Worker auth/API tests, extension popup/duplicate tests and
-dashboard list/sort tests. The Worker tests use a fake D1 binding, not a live Cloudflare
-account. `npm run check` runs `node --check` over the Worker, session helper, dashboard
-scripts and extension scripts.
+`npm test` runs local API tests, Worker auth/API tests, extension popup/duplicate tests,
+dashboard list/sort tests and price extraction/formatting tests. The Worker tests use a fake
+D1 binding, not a live Cloudflare account. The price tests use a minimal fake document; they
+do not load a real store page. `npm run check` runs `node --check` over the Worker, session
+helper, dashboard scripts and extension scripts.
 
 Apply migrations to the local D1 copy (no Cloudflare account needed) with
 `npx wrangler d1 migrations apply buy-this-for-me --local`.
@@ -430,6 +440,11 @@ URL never reaches the online Worker.
   matching normalized link but does not block duplicates; it does not queue or retry failed
   sends. URL normalization ignores tracking parameters, fragments and trailing slashes.
 - The dashboard renders `http(s)` links only; titles and notes are inserted as text, not HTML.
+- Automatic price lookup is heuristic: it reads JSON-LD `Product` offers, price meta tags and
+  `itemprop="price"` from the active tab, accepts euro or unlabelled amounts, and never
+  overwrites a typed price. It can pick a wrong amount (for example a strike-through or a
+  per-unit price), so the popup always asks you to check it. Pages that hide prices behind
+  scripts or a login simply produce no suggestion.
 - D1 is eventually consistent across Cloudflare locations; the dashboard's 15-second refresh
   is usually enough for a household list.
 
@@ -447,5 +462,6 @@ URL never reaches the online Worker.
 | Popup says "Password is missing or wrong" | Open the extension settings and save the current app password. Rotating the Worker secret requires updating it there too. |
 | Popup says it cannot reach the online server | Check the network connection and the Dashboard URL in extension settings; the Worker URL must be the `https://` root with no path. |
 | Title/link not pre-filled | Click the icon on a normal `http(s)` page. Reload the extension after file edits. |
+| Price not pre-filled from the page | Extraction is best effort (JSON-LD, price meta tags, `itemprop="price"`). Type it manually; any found price is only a suggestion. |
 | Changes not visible | Reload the extension in `edge://extensions`; refresh the dashboard. |
 | Server refuses to start and mentions invalid JSON | `data\requests.json` is malformed. Move it aside, then restart. |

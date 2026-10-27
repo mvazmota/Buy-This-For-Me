@@ -73,8 +73,9 @@ npx wrangler deploy
   `https://buy-this-for-me.m-vaz-mota.workers.dev/api/requests` with the `X-App-Password`
   header, and reads the same route with that header to warn about duplicate links. There is
   no dashboard tab or `#draft` fragment handoff.
-- `price` is optional, nullable, and stored as a plain number (at most 2 decimals). The
-  dashboard displays it with two decimals and no currency symbol.
+- `price` is optional, nullable, and stored as a plain number (at most 2 decimals, no currency
+  field). Prices are euros and are displayed with EUR formatting (`pt-PT`, e.g. `12,99 €`) by
+  the dashboard and the extension popup.
 - Keep changes consistent with the existing plain Node/browser JavaScript style. Do not add a
   framework or front-end build step without explicit approval.
 

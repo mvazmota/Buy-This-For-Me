@@ -117,8 +117,13 @@ function hasPrice(request) {
   );
 }
 
-function formatPrice(value) {
-  return Number(value).toFixed(2);
+// The edit inputs stay plain numbers so type="number" keeps working; the hint
+// under the price field shows the euro amount with the shared formatter.
+function formatEditPriceHint(rawValue) {
+  const text = String(rawValue === null || rawValue === undefined ? '' : rawValue).trim();
+  if (!text) return '';
+  const value = Number(text);
+  return Number.isFinite(value) ? BIFMList.formatPrice(value) : '';
 }
 
 /**
@@ -303,7 +308,7 @@ async function handleLogout() {
   }
 }
 
-function createEditField(request, { name, label, value, type = 'text', multiline = false, maxLength, min, max, step }) {
+function createEditField(request, { name, label, value, type = 'text', multiline = false, maxLength, min, max, step, hint = false }) {
   const wrapper = document.createElement('div');
   wrapper.className = `edit-field edit-${name}`;
 
@@ -328,12 +333,20 @@ function createEditField(request, { name, label, value, type = 'text', multiline
   input.value = value === null || value === undefined ? '' : String(value);
   wrapper.appendChild(input);
 
+  let hintEl = null;
+  if (hint) {
+    hintEl = document.createElement('p');
+    hintEl.className = 'edit-hint';
+    hintEl.hidden = true;
+    wrapper.appendChild(hintEl);
+  }
+
   const error = document.createElement('p');
   error.className = 'field-error';
   error.hidden = true;
   wrapper.appendChild(error);
 
-  return { wrapper, input, error };
+  return { wrapper, input, hint: hintEl, error };
 }
 
 function createEditForm(request) {
@@ -370,12 +383,13 @@ function createEditForm(request) {
     }),
     price: createEditField(request, {
       name: 'price',
-      label: 'Price (optional)',
-      value: hasPrice(request) ? formatPrice(request.price) : '',
+      label: 'Price (optional, in euros)',
+      value: hasPrice(request) ? Number(request.price).toFixed(2) : '',
       type: 'number',
       min: 0,
       max: LIMITS.price,
       step: '0.01',
+      hint: true,
     }),
     note: createEditField(request, {
       name: 'note',
@@ -390,6 +404,16 @@ function createEditForm(request) {
     grid.appendChild(fields[key].wrapper);
   }
   form.appendChild(grid);
+
+  function updatePriceHint() {
+    if (!fields.price.hint) return;
+    const text = formatEditPriceHint(fields.price.input.value);
+    fields.price.hint.textContent = text;
+    fields.price.hint.hidden = !text;
+  }
+
+  updatePriceHint();
+  fields.price.input.addEventListener('input', updatePriceHint);
 
   const actions = document.createElement('div');
   actions.className = 'edit-actions';
@@ -473,7 +497,7 @@ function buildCard(request) {
   if (hasPrice(request)) {
     const price = document.createElement('span');
     price.className = 'price';
-    price.textContent = `Price ${formatPrice(request.price)}`;
+    price.textContent = `Price ${BIFMList.formatPrice(request.price)}`;
     side.appendChild(price);
   }
 

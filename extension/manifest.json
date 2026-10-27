@@ -20,7 +20,7 @@
     }
   },
   "options_page": "options.html",
-  "permissions": ["activeTab", "storage"],
+  "permissions": ["activeTab", "storage", "scripting"],
   "host_permissions": [
     "http://127.0.0.1:3000/*",
     "http://localhost:3000/*",

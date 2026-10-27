@@ -3,7 +3,15 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { filterAndSortRequests } = require('../public/list-utils');
+const { filterAndSortRequests, formatPrice } = require('../public/list-utils');
+
+// Same options as public/list-utils.js; keeps the assertions locale-stable.
+const EURO = new Intl.NumberFormat('pt-PT', {
+  style: 'currency',
+  currency: 'EUR',
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
 
 // Input order mimics the API: newest first, with deliberate ties.
 const REQUESTS = [
@@ -188,4 +196,20 @@ test('handles unknown sorts, missing options, and non-array input', () => {
   assert.deepEqual(ids(filterAndSortRequests(REQUESTS)), ['e', 'd', 'c', 'b', 'a']);
   assert.deepEqual(filterAndSortRequests(null), []);
   assert.deepEqual(filterAndSortRequests(undefined, undefined), []);
+});
+
+test('formatPrice shows euros with two decimals and hides missing prices', () => {
+  const formatted = formatPrice(12.5);
+  assert.equal(formatted, EURO.format(12.5));
+  assert.equal(formatted.replace(/\u00a0/g, ' '), '12,50 €');
+  assert.ok(formatted.includes('€'));
+  assert.ok(formatted.includes('12,50'));
+
+  assert.equal(formatPrice(59.95), EURO.format(59.95));
+  assert.equal(formatPrice(0), EURO.format(0));
+
+  assert.equal(formatPrice(null), '');
+  assert.equal(formatPrice(undefined), '');
+  assert.equal(formatPrice(''), '');
+  assert.equal(formatPrice('not a price'), '');
 });

@@ -6,6 +6,8 @@ const form = document.getElementById('request-form');
 const titleInput = document.getElementById('title');
 const quantityInput = document.getElementById('quantity');
 const priceInput = document.getElementById('price');
+const priceDisplay = document.getElementById('price-display');
+const priceHint = document.getElementById('price-hint');
 const noteInput = document.getElementById('note');
 const urlInput = document.getElementById('url');
 const submitButton = document.getElementById('submit');
@@ -104,6 +106,83 @@ function isHttpUrl(value) {
   }
 }
 
+const PRICE_AUTOFILL_HINT = 'Price found on the page — check it.';
+
+function hidePriceHint() {
+  priceHint.hidden = true;
+  priceHint.textContent = '';
+}
+
+function showPriceHint(message) {
+  priceHint.textContent = message;
+  priceHint.hidden = false;
+}
+
+/** Show the typed/auto-filled price as a euro amount (input stays numeric). */
+function updatePriceDisplay() {
+  const raw = priceInput.value.trim();
+  const formatted =
+    raw && typeof BIFMPrice !== 'undefined' && BIFMPrice ? BIFMPrice.formatPrice(raw) : '';
+  priceDisplay.textContent = formatted;
+  priceDisplay.hidden = !formatted;
+}
+
+function pickPriceResult(results) {
+  if (!Array.isArray(results)) return null;
+  for (const entry of results) {
+    const value = entry && typeof entry === 'object' ? entry.result : null;
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value;
+  }
+  return null;
+}
+
+/**
+ * Ask the active page for a product price. The extractor lives in
+ * price-extractor.js and is injected as a file, so there is only one
+ * implementation; the follow-up func only calls it. Every failure (browser
+ * pages, denied injection, no price) is silent: the popup works without it.
+ */
+async function autoFillPriceFromPage(tab) {
+  if (!tab || !tab.id || !tab.url || !isHttpUrl(tab.url)) return;
+  if (!chrome.scripting || typeof chrome.scripting.executeScript !== 'function') return;
+
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: ['price-extractor.js'],
+    });
+
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => {
+        try {
+          if (
+            window.BIFMPrice &&
+            typeof window.BIFMPrice.extractPriceFromDocument === 'function'
+          ) {
+            return window.BIFMPrice.extractPriceFromDocument(document);
+          }
+        } catch {
+          return null;
+        }
+        return null;
+      },
+    });
+
+    const price = pickPriceResult(results);
+    if (price === null) return;
+    // Never overwrite a price the user already typed.
+    if (priceInput.value.trim() !== '') return;
+
+    priceInput.value = price.toFixed(2);
+    updatePriceDisplay();
+    showPriceHint(PRICE_AUTOFILL_HINT);
+  } catch {
+    // Injection can be denied (edge://, chrome://, restricted pages) or the
+    // page may not allow scripts. Leave the field empty with no error.
+  }
+}
+
 // fetch() rejects with a TypeError when the server cannot be reached.
 function isNetworkError(err) {
   return err instanceof TypeError || Boolean(err && err.name === 'TypeError');
@@ -183,7 +262,7 @@ async function prefillFromActiveTab() {
     if (!tab) {
       pageHint.textContent = 'No active tab found. You can still enter an item manually.';
       pageHint.hidden = false;
-      return;
+      return null;
     }
 
     if (tab.title) {
@@ -197,15 +276,19 @@ async function prefillFromActiveTab() {
         'This page is not a normal website (for example a browser or extension page), so its link was not filled in. Open the product page and click the extension again.';
       pageHint.hidden = false;
     }
+    return tab;
   } catch (err) {
     pageHint.textContent = `Could not read the active tab: ${err.message}`;
     pageHint.hidden = false;
+    return null;
   }
 }
 
 function resetFormAfterSuccess() {
   form.reset();
   quantityInput.value = '1';
+  hidePriceHint();
+  updatePriceDisplay();
 }
 
 async function sendToLocal(payload) {
@@ -400,9 +483,16 @@ const backendReady = applyBackend();
 form.addEventListener('submit', submitRequest);
 duplicateAddButton.addEventListener('click', confirmDuplicate);
 duplicateCancelButton.addEventListener('click', cancelDuplicate);
+priceInput.addEventListener('input', () => {
+  updatePriceDisplay();
+  hidePriceHint();
+});
 optionsLink.addEventListener('click', (event) => {
   event.preventDefault();
   chrome.runtime.openOptionsPage();
 });
 
-backendReady.then(prefillFromActiveTab);
+backendReady.then(async () => {
+  const tab = await prefillFromActiveTab();
+  await autoFillPriceFromPage(tab);
+});

@@ -31,6 +31,25 @@
     return index === -1 ? STATUS_ORDER.length : index;
   }
 
+  // Keep in sync with extension/price-extractor.js (the popup copy).
+  const PRICE_FORMATTER = new Intl.NumberFormat('pt-PT', {
+    style: 'currency',
+    currency: 'EUR',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+
+  /**
+   * Format a stored plain number as a euro amount, e.g. 12.5 -> "12,50 €".
+   * Missing or unusable values render as an empty string.
+   */
+  function formatPrice(value) {
+    if (value === null || value === undefined || value === '') return '';
+    const number = Number(value);
+    if (!Number.isFinite(number)) return '';
+    return PRICE_FORMATTER.format(number);
+  }
+
   // Requests without a price sort after every priced request.
   function price(request) {
     if (request.price === null || request.price === undefined || request.price === '') {
@@ -109,7 +128,7 @@
       .map((entry) => entry.request);
   }
 
-  const api = { filterAndSortRequests, SORT_OPTIONS, STATUS_ORDER };
+  const api = { filterAndSortRequests, formatPrice, SORT_OPTIONS, STATUS_ORDER };
 
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = api;

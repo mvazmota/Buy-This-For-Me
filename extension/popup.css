@@ -111,6 +111,12 @@ button:disabled {
   font-size: 12px;
 }
 
+.price-display {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .status {
   margin: 10px 0 0;
   padding: 8px 10px;
