@@ -4,7 +4,16 @@ const STATUSES = ['New', 'Purchased', 'Done', 'Not buying'];
 const REFRESH_MS = 15000;
 const STORAGE_KEY = 'bifm.dashboard.list-state.v1';
 const DEFAULT_STATE = Object.freeze({ query: '', status: 'all', sort: 'newest' });
-const SORT_VALUES = ['newest', 'oldest', 'title', 'quantity', 'status'];
+const SORT_VALUES = ['newest', 'oldest', 'title', 'quantity', 'price', 'status'];
+
+// Keep these in sync with lib/validate.js (the server is the final authority).
+const LIMITS = {
+  title: 200,
+  note: 1000,
+  url: 2048,
+  quantity: 999,
+  price: 1000000,
+};
 
 const listEl = document.getElementById('list');
 const emptyEl = document.getElementById('empty');
@@ -99,12 +108,78 @@ function isHttpUrl(value) {
   }
 }
 
+function hasPrice(request) {
+  return (
+    request.price !== null &&
+    request.price !== undefined &&
+    request.price !== '' &&
+    Number.isFinite(Number(request.price))
+  );
+}
+
+function formatPrice(value) {
+  return Number(value).toFixed(2);
+}
+
+/**
+ * Validate the inline edit form with the same rules as the server.
+ * Returns { value, errors }; value is only used when errors is empty.
+ */
+function validateEdit(values) {
+  const errors = {};
+  const title = values.title.trim();
+  const url = values.url.trim();
+  const note = values.note.trim();
+  const quantityRaw = values.quantity.trim();
+  const priceRaw = values.price.trim();
+
+  if (!title) {
+    errors.title = 'Title is required.';
+  } else if (title.length > LIMITS.title) {
+    errors.title = `Title must be ${LIMITS.title} characters or fewer.`;
+  }
+
+  if (!url) {
+    errors.url = 'URL is required.';
+  } else if (url.length > LIMITS.url) {
+    errors.url = `URL must be ${LIMITS.url} characters or fewer.`;
+  } else if (!isHttpUrl(url)) {
+    errors.url = 'URL must be a valid http:// or https:// address.';
+  }
+
+  if (note.length > LIMITS.note) {
+    errors.note = `Note must be ${LIMITS.note} characters or fewer.`;
+  }
+
+  const quantity = Number(quantityRaw);
+  if (!quantityRaw || !Number.isInteger(quantity) || quantity < 1 || quantity > LIMITS.quantity) {
+    errors.quantity = `Quantity must be a whole number from 1 to ${LIMITS.quantity}.`;
+  }
+
+  let price = null;
+  if (priceRaw) {
+    price = Number(priceRaw);
+    if (!Number.isFinite(price) || price < 0 || price > LIMITS.price) {
+      errors.price = `Price must be a number from 0 to ${LIMITS.price}.`;
+    } else if (Math.abs(price * 100 - Math.round(price * 100)) > 1e-6) {
+      errors.price = 'Price can have at most 2 decimals.';
+    }
+  }
+
+  return {
+    errors,
+    value: { title, url, note, quantity, price },
+  };
+}
+
 function stopRefresh() {
   window.clearInterval(refreshTimer);
   refreshTimer = null;
 }
 
 function isEditing() {
+  // Never re-render over an open inline edit form, even when focus is on a button.
+  if (listEl.querySelector('.request-edit:not([hidden])')) return true;
   const active = document.activeElement;
   if (!active || !appView.contains(active)) return false;
   return active.matches('input, select, textarea');
@@ -228,6 +303,135 @@ async function handleLogout() {
   }
 }
 
+function createEditField(request, { name, label, value, type = 'text', multiline = false, maxLength, min, max, step }) {
+  const wrapper = document.createElement('div');
+  wrapper.className = `edit-field edit-${name}`;
+
+  const inputId = `edit-${request.id}-${name}`;
+  const labelEl = document.createElement('label');
+  labelEl.htmlFor = inputId;
+  labelEl.textContent = label;
+  wrapper.appendChild(labelEl);
+
+  const input = document.createElement(multiline ? 'textarea' : 'input');
+  input.id = inputId;
+  input.name = name;
+  if (multiline) {
+    input.rows = 3;
+  } else {
+    input.type = type;
+  }
+  if (maxLength) input.maxLength = maxLength;
+  if (min !== undefined) input.min = String(min);
+  if (max !== undefined) input.max = String(max);
+  if (step !== undefined) input.step = String(step);
+  input.value = value === null || value === undefined ? '' : String(value);
+  wrapper.appendChild(input);
+
+  const error = document.createElement('p');
+  error.className = 'field-error';
+  error.hidden = true;
+  wrapper.appendChild(error);
+
+  return { wrapper, input, error };
+}
+
+function createEditForm(request) {
+  const form = document.createElement('form');
+  form.className = 'request-edit';
+  form.hidden = true;
+  form.noValidate = true;
+
+  const grid = document.createElement('div');
+  grid.className = 'edit-grid';
+
+  const fields = {
+    title: createEditField(request, {
+      name: 'title',
+      label: 'Title',
+      value: request.title,
+      maxLength: LIMITS.title,
+    }),
+    url: createEditField(request, {
+      name: 'url',
+      label: 'URL',
+      value: request.url,
+      type: 'url',
+      maxLength: LIMITS.url,
+    }),
+    quantity: createEditField(request, {
+      name: 'quantity',
+      label: 'Quantity',
+      value: request.quantity,
+      type: 'number',
+      min: 1,
+      max: LIMITS.quantity,
+      step: 1,
+    }),
+    price: createEditField(request, {
+      name: 'price',
+      label: 'Price (optional)',
+      value: hasPrice(request) ? formatPrice(request.price) : '',
+      type: 'number',
+      min: 0,
+      max: LIMITS.price,
+      step: '0.01',
+    }),
+    note: createEditField(request, {
+      name: 'note',
+      label: 'Note (optional)',
+      value: request.note,
+      multiline: true,
+      maxLength: LIMITS.note,
+    }),
+  };
+
+  for (const key of ['title', 'url', 'quantity', 'price', 'note']) {
+    grid.appendChild(fields[key].wrapper);
+  }
+  form.appendChild(grid);
+
+  const actions = document.createElement('div');
+  actions.className = 'edit-actions';
+
+  const saveButton = document.createElement('button');
+  saveButton.type = 'submit';
+  saveButton.className = 'button button-primary edit-save';
+  saveButton.textContent = 'Save';
+
+  const cancelButton = document.createElement('button');
+  cancelButton.type = 'button';
+  cancelButton.className = 'button edit-cancel';
+  cancelButton.textContent = 'Cancel';
+
+  actions.appendChild(saveButton);
+  actions.appendChild(cancelButton);
+  form.appendChild(actions);
+
+  function clearErrors() {
+    for (const field of Object.values(fields)) {
+      field.error.textContent = '';
+      field.error.hidden = true;
+      field.input.removeAttribute('aria-invalid');
+    }
+  }
+
+  function setErrors(errors) {
+    clearErrors();
+    let firstInvalid = null;
+    for (const [name, message] of Object.entries(errors || {})) {
+      if (!fields[name]) continue;
+      fields[name].error.textContent = message;
+      fields[name].error.hidden = false;
+      fields[name].input.setAttribute('aria-invalid', 'true');
+      if (!firstInvalid) firstInvalid = fields[name].input;
+    }
+    if (firstInvalid) firstInvalid.focus();
+  }
+
+  return { form, fields, saveButton, cancelButton, clearErrors, setErrors };
+}
+
 function buildCard(request) {
   const card = document.createElement('article');
   card.className = 'request-card';
@@ -265,6 +469,13 @@ function buildCard(request) {
 
   const side = document.createElement('div');
   side.className = 'request-side';
+
+  if (hasPrice(request)) {
+    const price = document.createElement('span');
+    price.className = 'price';
+    price.textContent = `Price ${formatPrice(request.price)}`;
+    side.appendChild(price);
+  }
 
   const qty = document.createElement('span');
   qty.className = 'qty';
@@ -326,8 +537,86 @@ function buildCard(request) {
   side.appendChild(select);
   side.appendChild(statusError);
 
+  const edit = createEditForm(request);
+
+  const editButton = document.createElement('button');
+  editButton.type = 'button';
+  editButton.className = 'button button-small edit-open';
+  editButton.textContent = 'Edit';
+  editButton.setAttribute('aria-label', `Edit ${request.title}`);
+
+  editButton.addEventListener('click', () => {
+    edit.clearErrors();
+    main.hidden = true;
+    side.hidden = true;
+    edit.form.hidden = false;
+    edit.fields.title.focus();
+  });
+
+  edit.cancelButton.addEventListener('click', () => {
+    edit.clearErrors();
+    edit.form.hidden = true;
+    main.hidden = false;
+    side.hidden = false;
+    editButton.focus();
+  });
+
+  edit.form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    edit.clearErrors();
+
+    const result = validateEdit({
+      title: edit.fields.title.input.value,
+      url: edit.fields.url.input.value,
+      note: edit.fields.note.input.value,
+      quantity: edit.fields.quantity.input.value,
+      price: edit.fields.price.input.value,
+    });
+
+    if (Object.keys(result.errors).length > 0) {
+      edit.setErrors(result.errors);
+      showBanner('Please fix the highlighted fields.', 'error');
+      return;
+    }
+
+    edit.saveButton.disabled = true;
+    edit.saveButton.textContent = 'Saving…';
+
+    try {
+      const response = await fetch(`/api/requests/${encodeURIComponent(request.id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(result.value),
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (response.status === 401) {
+        showLogin({ message: 'Your session expired. Log in again to change requests.' });
+        return;
+      }
+
+      if (!response.ok) {
+        if (data.details && typeof data.details === 'object') {
+          edit.setErrors(data.details);
+        }
+        throw new Error(data.error || `Server returned ${response.status}.`);
+      }
+
+      hideBanner();
+      await loadRequests({ silent: true });
+    } catch (err) {
+      showBanner(`Could not save changes: ${err.message}`, 'error');
+    } finally {
+      edit.saveButton.disabled = false;
+      edit.saveButton.textContent = 'Save';
+    }
+  });
+
+  side.appendChild(editButton);
+
   card.appendChild(main);
   card.appendChild(side);
+  card.appendChild(edit.form);
   return card;
 }
 

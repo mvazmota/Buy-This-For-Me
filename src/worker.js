@@ -13,10 +13,10 @@ import {
   verifySessionToken,
 } from './session.js';
 
-const { validateNewRequest, validateStatusUpdate } = validateModule;
+const { validateNewRequest, validateRequestUpdate } = validateModule;
 
 const MAX_BODY_BYTES = 64 * 1024;
-const REQUEST_COLUMNS = 'id, title, url, note, quantity, status, submitted_at, updated_at';
+const REQUEST_COLUMNS = 'id, title, url, note, quantity, price, status, submitted_at, updated_at';
 const JSON_HEADERS = {
   'Content-Type': 'application/json; charset=utf-8',
   'Cache-Control': 'no-store',
@@ -46,6 +46,7 @@ function rowToRequest(row) {
     url: row.url,
     note: row.note,
     quantity: row.quantity,
+    price: row.price === null || row.price === undefined ? null : Number(row.price),
     status: row.status,
     submittedAt: row.submitted_at,
     updatedAt: row.updated_at,
@@ -129,14 +130,15 @@ async function createRequest(env, value) {
     url: value.url,
     note: value.note,
     quantity: value.quantity,
+    price: value.price === undefined ? null : value.price,
     status: 'New',
     submittedAt: now,
     updatedAt: now,
   };
 
   await env.DB.prepare(
-    'INSERT INTO requests (id, title, url, note, quantity, status, submitted_at, updated_at) ' +
-      'VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    'INSERT INTO requests (id, title, url, note, quantity, price, status, submitted_at, updated_at) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
   )
     .bind(
       request.id,
@@ -144,6 +146,7 @@ async function createRequest(env, value) {
       request.url,
       request.note,
       request.quantity,
+      request.price,
       request.status,
       request.submittedAt,
       request.updatedAt
@@ -153,18 +156,35 @@ async function createRequest(env, value) {
   return request;
 }
 
-async function updateStatus(env, id, status) {
+async function updateRequest(env, id, changes) {
   const existing = await env.DB.prepare(`SELECT ${REQUEST_COLUMNS} FROM requests WHERE id = ?`)
     .bind(id)
     .first();
   if (!existing) return null;
 
-  const updatedAt = new Date().toISOString();
-  await env.DB.prepare('UPDATE requests SET status = ?, updated_at = ? WHERE id = ?')
-    .bind(status, updatedAt, id)
+  const updated = {
+    ...rowToRequest(existing),
+    ...changes,
+    updatedAt: new Date().toISOString(),
+  };
+
+  await env.DB.prepare(
+    'UPDATE requests SET title = ?, url = ?, note = ?, quantity = ?, price = ?, status = ?, ' +
+      'updated_at = ? WHERE id = ?'
+  )
+    .bind(
+      updated.title,
+      updated.url,
+      updated.note,
+      updated.quantity,
+      updated.price,
+      updated.status,
+      updated.updatedAt,
+      id
+    )
     .run();
 
-  return { ...rowToRequest(existing), status, updatedAt };
+  return updated;
 }
 
 async function isExtensionAuthorized(request, env) {
@@ -210,12 +230,12 @@ async function handleRequests(request, env, url, extensionAuthorized = false) {
   }
 
   const body = await readJsonBody(request);
-  const result = validateStatusUpdate(body);
+  const result = validateRequestUpdate(body);
   if (!result.ok) {
     return json({ error: 'Please fix the highlighted fields.', details: result.errors }, 400);
   }
 
-  const updated = await updateStatus(env, id, result.value);
+  const updated = await updateRequest(env, id, result.value);
   if (!updated) return json({ error: 'Request not found.' }, 404);
   return json({ request: updated });
 }
@@ -244,11 +264,13 @@ async function handleLogin(request, env) {
 }
 
 async function handleApi(request, env, url) {
-  // The extension posts new requests directly to POST /api/requests with the
-  // app password in the X-App-Password header. That header only bypasses the
-  // same-origin check and the session cookie for that one route and method.
+  // The extension talks to /api/requests directly with the app password in the
+  // X-App-Password header: it reads the list to warn about duplicates and posts
+  // new requests. That header only bypasses the same-origin check and the
+  // session cookie for GET/POST on that one route. PATCH still needs the cookie.
   const extensionPath =
-    url.pathname === '/api/requests' && request.method === 'POST';
+    url.pathname === '/api/requests' &&
+    (request.method === 'GET' || request.method === 'POST');
   const extensionAuthorized = extensionPath && (await isExtensionAuthorized(request, env));
 
   if (!extensionAuthorized && !isSameOrigin(request, url)) {

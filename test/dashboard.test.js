@@ -92,6 +92,30 @@ test('sorts quantity high to low and keeps ties stable', () => {
   ]);
 });
 
+test('sorts price high to low and puts requests without a price last', () => {
+  const priced = [
+    { id: 'none-a', price: null, submittedAt: '2026-02-01T00:00:00.000Z' },
+    { id: 'cheap', price: 4.5, submittedAt: '2026-02-02T00:00:00.000Z' },
+    { id: 'expensive', price: 99.99, submittedAt: '2026-02-03T00:00:00.000Z' },
+    { id: 'none-b', submittedAt: '2026-02-04T00:00:00.000Z' },
+    { id: 'tie', price: 4.5, submittedAt: '2026-02-05T00:00:00.000Z' },
+    { id: 'free', price: 0, submittedAt: '2026-02-06T00:00:00.000Z' },
+  ];
+
+  // Input order decides ties; unpriced rows keep that order after priced rows.
+  assert.deepEqual(ids(filterAndSortRequests(priced, { sort: 'price' })), [
+    'expensive',
+    'cheap',
+    'tie',
+    'free',
+    'none-a',
+    'none-b',
+  ]);
+  assert.ok(
+    filterAndSortRequests(priced, { sort: 'price' }).some((request) => request.id === 'free')
+  );
+});
+
 test('sorts status in workflow order and keeps ties stable', () => {
   assert.deepEqual(ids(filterAndSortRequests(REQUESTS, { sort: 'status' })), [
     'a',

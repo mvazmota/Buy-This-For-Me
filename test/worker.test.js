@@ -65,13 +65,26 @@ function createFakeD1() {
               url: args[2],
               note: args[3],
               quantity: args[4],
-              status: args[5],
-              submitted_at: args[6],
-              updated_at: args[7],
+              price: args[5],
+              status: args[6],
+              submitted_at: args[7],
+              updated_at: args[8],
             });
             return { meta: { changes: 1 } };
           }
-          if (/^UPDATE requests/i.test(sql)) {
+          if (/^UPDATE requests SET title = \?/i.test(sql)) {
+            const row = rows.find((entry) => entry.id === args[7]);
+            if (!row) return { meta: { changes: 0 } };
+            row.title = args[0];
+            row.url = args[1];
+            row.note = args[2];
+            row.quantity = args[3];
+            row.price = args[4];
+            row.status = args[5];
+            row.updated_at = args[6];
+            return { meta: { changes: 1 } };
+          }
+          if (/^UPDATE requests SET status = \?/i.test(sql)) {
             const row = rows.find((entry) => entry.id === args[2]);
             if (!row) return { meta: { changes: 0 } };
             row.status = args[0];
@@ -185,18 +198,32 @@ workerTest('cross-origin API requests are rejected', async () => {
   assert.match((await readJson(response)).error, /Cross-origin/);
 });
 
-workerTest('cross-origin request creation still requires the session cookie', async () => {
+workerTest('cross-origin GET allows a valid app password; other cross-origin calls stay blocked', async () => {
   const worker = (await loadWorker()).default;
   const env = envWithDb();
 
-  const getResponse = await worker.fetch(
+  const authorized = await worker.fetch(
     new Request(`${WORKER_URL}/api/requests`, {
-      headers: { Origin: 'https://evil.example', 'X-App-Password': PASSWORD },
+      headers: { Origin: 'chrome-extension://abc', 'X-App-Password': PASSWORD },
     }),
     env
   );
-  assert.equal(getResponse.status, 403);
+  assert.equal(authorized.status, 200);
+  assert.deepEqual(await readJson(authorized), { requests: [] });
 
+  for (const headers of [
+    { Origin: 'https://evil.example' },
+    { Origin: 'https://evil.example', 'X-App-Password': 'wrong' },
+  ]) {
+    const rejected = await worker.fetch(
+      new Request(`${WORKER_URL}/api/requests`, { headers }),
+      env
+    );
+    assert.equal(rejected.status, 401);
+    assert.deepEqual(await readJson(rejected), { error: 'Authentication required.' });
+  }
+
+  // PATCH has no extension-header shortcut: it still needs the login cookie.
   const patchResponse = await worker.fetch(
     new Request(`${WORKER_URL}/api/requests/some-id`, {
       method: 'PATCH',
@@ -239,7 +266,20 @@ workerTest('the extension app-password header creates requests without a cookie'
   const body = await readJson(created);
   assert.equal(body.request.title, 'Running shoes');
   assert.equal(body.request.status, 'New');
+  assert.equal(body.request.price, null);
   assert.equal(env.DB.rows.length, 1);
+
+  const listedForExtension = await worker.fetch(
+    new Request(`${WORKER_URL}/api/requests`, {
+      headers: { 'X-App-Password': PASSWORD },
+    }),
+    env
+  );
+  assert.equal(listedForExtension.status, 200);
+  const listedBody = await readJson(listedForExtension);
+  assert.equal(listedBody.requests.length, 1);
+  assert.equal(listedBody.requests[0].id, body.request.id);
+  assert.equal(listedBody.requests[0].price, null);
 
   for (const headers of [
     { 'Content-Type': 'application/json', Origin: 'chrome-extension://abc' },
@@ -325,6 +365,7 @@ workerTest('authenticated create/list/update flow stores D1 rows and keeps API s
         url: 'https://example.com/shoes',
         note: 'Size 43',
         quantity: 2,
+        price: 49.5,
       }),
     }),
     env
@@ -334,6 +375,7 @@ workerTest('authenticated create/list/update flow stores D1 rows and keeps API s
   assert.match(request.id, /^[0-9a-f-]{36}$/);
   assert.equal(request.title, 'Running shoes');
   assert.equal(request.quantity, 2);
+  assert.equal(request.price, 49.5);
   assert.equal(request.status, 'New');
   assert.ok(Date.parse(request.submittedAt));
 
@@ -342,7 +384,53 @@ workerTest('authenticated create/list/update flow stores D1 rows and keeps API s
     env
   );
   assert.equal(listed.status, 200);
-  assert.equal((await readJson(listed)).requests.length, 1);
+  const listedRequests = (await readJson(listed)).requests;
+  assert.equal(listedRequests.length, 1);
+  assert.equal(listedRequests[0].price, 49.5);
+
+  const edited = await worker.fetch(
+    new Request(`${WORKER_URL}/api/requests/${request.id}`, {
+      method: 'PATCH',
+      headers: authHeaders,
+      body: JSON.stringify({
+        title: 'Running shoes (wide)',
+        note: '',
+        quantity: 3,
+        price: 59.95,
+      }),
+    }),
+    env
+  );
+  assert.equal(edited.status, 200);
+  const editedRequest = (await readJson(edited)).request;
+  assert.equal(editedRequest.title, 'Running shoes (wide)');
+  assert.equal(editedRequest.note, '');
+  assert.equal(editedRequest.quantity, 3);
+  assert.equal(editedRequest.price, 59.95);
+  assert.equal(editedRequest.url, 'https://example.com/shoes');
+  assert.equal(editedRequest.status, 'New');
+
+  const invalidEdit = await worker.fetch(
+    new Request(`${WORKER_URL}/api/requests/${request.id}`, {
+      method: 'PATCH',
+      headers: authHeaders,
+      body: JSON.stringify({ price: 1.234 }),
+    }),
+    env
+  );
+  assert.equal(invalidEdit.status, 400);
+  assert.ok((await readJson(invalidEdit)).details.price);
+
+  const emptied = await worker.fetch(
+    new Request(`${WORKER_URL}/api/requests/${request.id}`, {
+      method: 'PATCH',
+      headers: authHeaders,
+      body: JSON.stringify({ price: null }),
+    }),
+    env
+  );
+  assert.equal(emptied.status, 200);
+  assert.equal((await readJson(emptied)).request.price, null);
 
   const updated = await worker.fetch(
     new Request(`${WORKER_URL}/api/requests/${request.id}`, {
@@ -355,6 +443,8 @@ workerTest('authenticated create/list/update flow stores D1 rows and keeps API s
   assert.equal(updated.status, 200);
   const updatedRequest = (await readJson(updated)).request;
   assert.equal(updatedRequest.status, 'Purchased');
+  assert.equal(updatedRequest.title, 'Running shoes (wide)');
+  assert.equal(updatedRequest.price, null);
   assert.ok(Date.parse(updatedRequest.updatedAt) >= Date.parse(updatedRequest.submittedAt));
 
   const invalid = await worker.fetch(

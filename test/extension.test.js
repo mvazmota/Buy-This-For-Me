@@ -14,6 +14,8 @@ const REMOTE_URL = 'https://buy-this-for-me.example.workers.dev';
 const WORKER_URL = 'https://buy-this-for-me.m-vaz-mota.workers.dev';
 const LOCAL_URL = 'http://127.0.0.1:3000';
 
+const { normalizeUrl, findDuplicateRequest } = require('../extension/url-utils');
+
 function createElement() {
   return {
     hidden: false,
@@ -89,22 +91,43 @@ function loadPopup({ backendUrl = REMOTE_URL, appPassword = 'family secret', fet
     chrome,
     document,
     URL,
+    URLSearchParams,
     console,
+    setTimeout,
+    clearTimeout,
     fetch: fetchImpl || (async () => {
       throw new Error('Unexpected fetch in extension test.');
     }),
   });
 
-  for (const file of ['settings.js', 'popup.js']) {
+  for (const file of ['settings.js', 'url-utils.js', 'popup.js']) {
     const source = fs.readFileSync(path.join(__dirname, '..', 'extension', file), 'utf8');
     const suffix =
       file === 'popup.js'
-        ? '\n;globalThis.__popupTest = { sendToRemote, sendToLocal, backendReady, getBackendUrl, getAppPassword, setAppPassword };'
+        ? '\n;globalThis.__popupTest = { sendToRemote, sendToLocal, backendReady, getBackendUrl, getAppPassword, setAppPassword, submitRequest, confirmDuplicate, cancelDuplicate, checkDuplicate, validate, getPendingPayload: () => pendingPayload };'
         : '';
     vm.runInContext(source + suffix, context, { filename: file });
   }
 
   return { ...context.__popupTest, elements, createdTabs, stored };
+}
+
+function flushAsync() {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function fillForm(elements, values = {}) {
+  const fields = {
+    title: 'Running shoes',
+    url: 'https://example.com/shoes',
+    quantity: '2',
+    price: '',
+    note: '',
+    ...values,
+  };
+  for (const [field, value] of Object.entries(fields)) {
+    elements.get(field).value = value;
+  }
 }
 
 test('no stored backend URL falls back to the deployed Worker URL', async () => {
@@ -246,6 +269,216 @@ test('local submissions still post directly and open no tab', async () => {
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, `${LOCAL_URL}/api/requests`);
   assert.equal(calls[0].options.method, 'POST');
+});
+
+test('normalizeUrl ignores tracking params, fragments, trailing slashes and host case', () => {
+  assert.equal(
+    normalizeUrl('HTTPS://Example.COM/Path/?utm_source=news&b=2&a=1#frag'),
+    'https://example.com/Path?a=1&b=2'
+  );
+  assert.equal(
+    normalizeUrl('https://example.com/item/?fbclid=1&gclid=2&ref=abc&tag=x&_ga=1'),
+    'https://example.com/item'
+  );
+  assert.equal(normalizeUrl('https://example.com/item///?utm_medium=email'), 'https://example.com/item');
+  assert.equal(normalizeUrl('https://example.com/'), 'https://example.com');
+  assert.equal(normalizeUrl('https://example.com/?utm_campaign=x'), 'https://example.com');
+  assert.equal(normalizeUrl('https://example.com/a?ref_src=newsletter'), 'https://example.com/a');
+  assert.equal(normalizeUrl('  https://example.com/a  '), 'https://example.com/a');
+
+  // Non-comparable input normalizes to an empty string.
+  assert.equal(normalizeUrl('not a url'), '');
+  assert.equal(normalizeUrl('javascript:alert(1)'), '');
+  assert.equal(normalizeUrl('ftp://example.com/file'), '');
+  assert.equal(normalizeUrl(''), '');
+  assert.equal(normalizeUrl(null), '');
+});
+
+test('findDuplicateRequest matches equivalent links only', () => {
+  const requests = [
+    { id: 'b', title: 'Bread', url: 'https://Bakery.example/loaf/#reviews' },
+    { id: 'm', title: 'Milk', url: 'https://shop.example/milk?utm_source=app' },
+  ];
+
+  assert.equal(findDuplicateRequest(requests, 'https://shop.example/milk/').id, 'm');
+  assert.equal(findDuplicateRequest(requests, 'https://bakery.example/loaf').id, 'b');
+  assert.equal(findDuplicateRequest(requests, 'https://shop.example/eggs'), null);
+  assert.equal(findDuplicateRequest(requests, 'not a url'), null);
+  assert.equal(findDuplicateRequest(null, 'https://shop.example/milk'), null);
+});
+
+test('popup warns about a duplicate and sends nothing until confirmed', async () => {
+  const calls = [];
+  const existing = {
+    id: 'existing',
+    title: 'Running shoes',
+    url: 'https://EXAMPLE.com/shoes/?utm_source=mail#top',
+    status: 'Purchased',
+  };
+
+  const fetchImpl = async (url, options = {}) => {
+    calls.push({ url, options });
+    if (!options.method) {
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return { requests: [existing] };
+        },
+      };
+    }
+    return {
+      ok: true,
+      status: 201,
+      async json() {
+        return { request: { title: 'Running shoes' } };
+      },
+    };
+  };
+
+  const context = loadPopup({ fetchImpl });
+  await context.backendReady;
+  await flushAsync();
+  fillForm(context.elements);
+
+  assert.equal(await context.submitRequest({ preventDefault() {} }), undefined);
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, `${REMOTE_URL}/api/requests`);
+  assert.equal(calls[0].options.method, undefined);
+  assert.equal(calls[0].options.headers['X-App-Password'], 'family secret');
+
+  const warning = context.elements.get('duplicate-warning');
+  assert.equal(warning.hidden, false);
+  const message = context.elements.get('duplicate-message').textContent;
+  assert.match(message, /Running shoes/);
+  assert.match(message, /Purchased/);
+  assert.ok(context.getPendingPayload());
+
+  assert.equal(await context.confirmDuplicate(), undefined);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].options.method, 'POST');
+  assert.equal(JSON.parse(calls[1].options.body).title, 'Running shoes');
+  assert.equal(warning.hidden, true);
+  assert.equal(context.getPendingPayload(), null);
+});
+
+test('popup posts normally when no duplicate exists', async () => {
+  const calls = [];
+  const fetchImpl = async (url, options = {}) => {
+    calls.push({ url, options });
+    if (!options.method) {
+      return { ok: true, status: 200, async json() { return { requests: [] }; } };
+    }
+    return {
+      ok: true,
+      status: 201,
+      async json() { return { request: { title: 'Running shoes' } }; },
+    };
+  };
+
+  const context = loadPopup({ fetchImpl });
+  await context.backendReady;
+  await flushAsync();
+  fillForm(context.elements);
+
+  await context.submitRequest({ preventDefault() {} });
+
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].options.method, 'POST');
+  assert.equal(context.elements.get('duplicate-warning').hidden, true);
+  assert.equal(context.elements.get('status').dataset.kind, 'success');
+});
+
+test('a failed duplicate check warns but still allows sending', async () => {
+  const calls = [];
+  const fetchImpl = async (url, options = {}) => {
+    calls.push({ url, options });
+    if (!options.method) throw new TypeError('Failed to fetch');
+    return {
+      ok: true,
+      status: 201,
+      async json() { return { request: { title: 'Running shoes' } }; },
+    };
+  };
+
+  const context = loadPopup({ fetchImpl });
+  await context.backendReady;
+  await flushAsync();
+  fillForm(context.elements);
+
+  await context.submitRequest({ preventDefault() {} });
+
+  assert.equal(calls.length, 1);
+  assert.equal(context.elements.get('duplicate-warning').hidden, false);
+  assert.match(context.elements.get('duplicate-message').textContent, /Could not check/);
+  assert.ok(context.getPendingPayload());
+
+  await context.confirmDuplicate();
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].options.method, 'POST');
+});
+
+test('cancel drops the pending duplicate without sending', async () => {
+  const calls = [];
+  const existing = { id: 'x', title: 'Milk', url: 'https://shop.example/milk', status: 'New' };
+  const fetchImpl = async (url, options = {}) => {
+    calls.push({ url, options });
+    if (!options.method) {
+      return { ok: true, status: 200, async json() { return { requests: [existing] }; } };
+    }
+    return { ok: true, status: 201, async json() { return { request: { title: 'Milk' } }; } };
+  };
+
+  const context = loadPopup({ fetchImpl });
+  await context.backendReady;
+  await flushAsync();
+  fillForm(context.elements, { title: 'Milk', url: 'https://shop.example/milk' });
+
+  await context.submitRequest({ preventDefault() {} });
+  assert.equal(calls.length, 1);
+  context.cancelDuplicate();
+
+  assert.equal(context.getPendingPayload(), null);
+  assert.equal(context.elements.get('duplicate-warning').hidden, true);
+  assert.equal(calls.length, 1);
+});
+
+test('popup sends price only when provided and validates its format', async () => {
+  const calls = [];
+  const fetchImpl = async (url, options = {}) => {
+    calls.push({ url, options });
+    if (!options.method) {
+      return { ok: true, status: 200, async json() { return { requests: [] }; } };
+    }
+    return {
+      ok: true,
+      status: 201,
+      async json() { return { request: { title: 'Running shoes' } }; },
+    };
+  };
+
+  const context = loadPopup({ fetchImpl });
+  await context.backendReady;
+  await flushAsync();
+
+  fillForm(context.elements);
+  await context.submitRequest({ preventDefault() {} });
+  const withoutPrice = JSON.parse(calls[1].options.body);
+  assert.equal('price' in withoutPrice, false);
+
+  calls.length = 0;
+  context.elements.get('duplicate-warning').hidden = true;
+  fillForm(context.elements, { price: '12.99' });
+  await context.submitRequest({ preventDefault() {} });
+  assert.equal(JSON.parse(calls[1].options.body).price, 12.99);
+
+  calls.length = 0;
+  fillForm(context.elements, { price: '12.999' });
+  await context.submitRequest({ preventDefault() {} });
+  assert.equal(calls.length, 0);
+  assert.equal(context.elements.get('price-error').hidden, false);
+  assert.match(context.elements.get('price-error').textContent, /2 decimals/);
 });
 
 test('manifest declares PNG icons and toolbar icons that exist', () => {

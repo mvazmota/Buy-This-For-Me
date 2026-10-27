@@ -31,6 +31,7 @@ migrations/                  D1 migrations (apply with Wrangler)
 wrangler.jsonc               Worker, static assets, D1 and workers.dev config
 public/                      shared dashboard (plain HTML/CSS/JS)
 extension/                   Manifest V3 extension for Edge (load this folder unpacked)
+extension/url-utils.js       canonical URL normalization for the duplicate warning
 test/api.test.js             local API tests using node:test
 test/worker.test.js          Worker auth/API tests using a fake D1
 data/requests.json           created automatically on first local save (ignored by git)
@@ -85,10 +86,11 @@ extension settings. The local server binds to loopback only.
 5. The extension **BIFM Shopping Requests** appears. Pin it if you want one-click access.
 6. Open a normal product page (`http://` or `https://`), click the extension icon. The popup
    pre-fills the page title and link.
-7. Edit the title if needed, set quantity (default 1), add an optional note, then click
-   **Send request**. By default this sends directly to the online Worker, so save the app
-   password in the extension settings first (section 2). See below to switch to the local
-   server.
+7. Edit the title if needed, set quantity (default 1), add an optional price and note, then
+   click **Send request**. By default this sends directly to the online Worker, so save the
+   app password in the extension settings first (section 2). See below to switch to the local
+   server. Before sending, the popup reads the list and warns when the same normalized link
+   is already there; choose **Add anyway** or **Cancel**.
 8. Open the dashboard to see it. The popup footer links to the configured dashboard.
 
 After editing extension files, return to `edge://extensions` and click the extension's
@@ -115,8 +117,9 @@ Rules for the settings:
 - Use the dashboard **root** URL. No `/api`, query string, or `#fragment`.
 - A remote URL must use `https://`. Plain `http://` is accepted only for the local server.
 - The app password is saved in `chrome.storage.local` in this browser profile only, and is
-  used only to POST requests to the configured Worker. It is never committed to the project.
-  Saving a remote URL without a password is rejected with a field error.
+  used only for `GET`/`POST /api/requests` on the configured Worker (GET feeds the duplicate
+  warning). It is never committed to the project. Saving a remote URL without a password is
+  rejected with a field error.
 - When the password is missing or wrong, the popup says so and asks you to update it in
   Settings. Nothing else is retried or queued.
 
@@ -134,8 +137,12 @@ left blank because the API only accepts `http://` and `https://` links.
 ## 3. Using the dashboard
 
 - Requests are listed **newest first**.
-- Each card shows the title (clickable original link), quantity, optional note, submitted
-  time, and a status menu.
+- Each card shows the title (clickable original link), quantity, optional price, optional
+  note, submitted time, and a status menu.
+- **Edit** opens an inline form for title, URL, note, quantity and price. **Save** or
+  **Cancel**; field errors appear under the form and match the server limits.
+- Prices display as a plain number with two decimals (no currency symbol) and can be cleared
+  with an empty price field. **Sort by → Price (high to low)** puts unpriced requests last.
 - Statuses save immediately: **New**, **Purchased**, **Done**, **Not buying**.
 - If an update fails, the menu reverts and an error banner explains why.
 - The page refreshes every 15 seconds and has a **Refresh** button.
@@ -161,8 +168,8 @@ Changing the Worker or redeploying does not clear D1.
 
 All responses are JSON. Local base URL: `http://127.0.0.1:3000`. Online base URL:
 `https://buy-this-for-me.m-vaz-mota.workers.dev`. Calls must be same-origin, except the
-extension's direct `POST /api/requests`, which authenticates with the `X-App-Password` header.
-Other cross-origin API requests are rejected by the Worker.
+extension's direct `GET`/`POST /api/requests`, which authenticate with the `X-App-Password`
+header. Other cross-origin API requests (including `PATCH`) are rejected by the Worker.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
@@ -170,9 +177,9 @@ Other cross-origin API requests are rejected by the Worker.
 | `GET` | `/api/session` | `{"authenticated":bool,"authRequired":bool}` |
 | `POST` | `/api/login` | Body `{"password":"..."}`; sets the session cookie online |
 | `POST` | `/api/logout` | Clears the session cookie online |
-| `GET` | `/api/requests` | `{"requests":[...]}` newest first (online: login required) |
+| `GET` | `/api/requests` | `{"requests":[...]}` newest first (online: login cookie or `X-App-Password` header) |
 | `POST` | `/api/requests` | Create a request (online: login cookie or `X-App-Password` header) |
-| `PATCH` | `/api/requests/:id` | Update only the status (online: login required) |
+| `PATCH` | `/api/requests/:id` | Update any subset of fields (online: login cookie required) |
 
 Create body:
 
@@ -181,14 +188,20 @@ Create body:
   "title": "Running shoes",
   "url": "https://example.com/shoes",
   "note": "Size 43, blue",
-  "quantity": 2
+  "quantity": 2,
+  "price": 59.95
 }
 ```
 
 Rules: `title` required, 1–200 characters after trimming; `url` required and must parse as
 `http://` or `https://` (max 2048); `note` optional, max 1000 characters; `quantity`
-optional whole number 1–999 (default 1). Status updates accept exactly one of the four
-statuses.
+optional whole number 1–999 (default 1); `price` optional number from 0 to 1000000 with at
+most 2 decimals, stored as `null` when omitted.
+
+`PATCH /api/requests/:id` accepts any subset of `title`, `url`, `note`, `quantity`, `price`
+and `status`, using the same field rules; at least one field is required. `price: null`
+(or `""`) clears it. A status-only body (`{"status":"Purchased"}`) keeps working as before.
+Each update refreshes `updatedAt` and returns the full request.
 
 Validation failures return `400` with a message and field details:
 
@@ -205,9 +218,10 @@ error (generic message). A request defaults to status `New` and records `submitt
 `updatedAt` as ISO timestamps.
 
 Online, `/api/requests` and `/api/requests/:id` return `401` until the login cookie is valid.
-The one exception is `POST /api/requests`: the extension sends its saved app password in the
+The exception is `GET`/`POST /api/requests`: the extension sends its saved app password in the
 `X-App-Password` header, and a valid value authorises that single request without a cookie. A
-missing or wrong header on a cross-origin create returns `401` and stores nothing. Login
+missing or wrong header on a cross-origin call returns `401` and stores nothing. `PATCH` never
+accepts the header as a substitute for the cookie. Login
 errors are deliberately generic and never reveal the configured password, and the password is
 never echoed in a response or a log.
 
@@ -218,9 +232,13 @@ npm test
 npm run check
 ```
 
-`npm test` runs local API tests and Worker auth/API tests. The Worker tests use a fake D1
-binding, not a live Cloudflare account. `npm run check` runs `node --check` over the Worker,
-session helper, dashboard script and extension scripts.
+`npm test` runs local API tests, Worker auth/API tests, extension popup/duplicate tests and
+dashboard list/sort tests. The Worker tests use a fake D1 binding, not a live Cloudflare
+account. `npm run check` runs `node --check` over the Worker, session helper, dashboard
+scripts and extension scripts.
+
+Apply migrations to the local D1 copy (no Cloudflare account needed) with
+`npx wrangler d1 migrations apply buy-this-for-me --local`.
 
 Optional: bundle the Worker without deploying (validates Wrangler config and imports):
 
@@ -286,8 +304,10 @@ npx wrangler d1 migrations apply buy-this-for-me --local
 ```
 
 `migrations/0001_create_requests.sql` creates the `requests` table and an index; it is
-idempotent (`IF NOT EXISTS`). When you add a new migration file, apply it with the same
-`--remote` command before deploying code that needs it.
+idempotent (`IF NOT EXISTS`). `migrations/0002_add_price.sql` adds the nullable `price`
+column. SQLite has no `ADD COLUMN IF NOT EXISTS`, so it is written plainly and relies on
+Wrangler's migration tracking to run once; existing rows get `NULL`. When you add a new
+migration file, apply it with the same `--remote` command before deploying code that needs it.
 
 ### 7.4 First deploy with Wrangler
 
@@ -399,15 +419,16 @@ URL never reaches the online Worker.
   Secure and SameSite=Lax, and expires after 7 days. Logging out clears it; rotating the
   secret invalidates all sessions.
 - The API rejects cross-origin calls and returns generic login/internal errors. No CORS
-  headers are added. The only cross-origin exception is the extension's
-  `POST /api/requests` with a valid `X-App-Password` header. Request bodies are capped at 64 KB.
+  headers are added. The only cross-origin exception is the extension's `GET`/`POST
+  /api/requests` with a valid `X-App-Password` header. Request bodies are capped at 64 KB.
 - `APP_PASSWORD` is a Cloudflare Worker secret. The extension also saves the same password in
   `chrome.storage.local` in this browser profile for direct submissions (family-only accepted
   risk). It is never committed to git and never hardcoded in source. Do not reuse an important
   password.
 - There is no rate limiting on login or on extension submissions. Choose a long random password.
-- No editing or deleting of existing requests, no categories, no purchase dates. A request can
-  be submitted twice if you click Send twice; the popup does not queue or retry failed sends.
+- No deleting of existing requests, no categories, no purchase dates. The popup warns about a
+  matching normalized link but does not block duplicates; it does not queue or retry failed
+  sends. URL normalization ignores tracking parameters, fragments and trailing slashes.
 - The dashboard renders `http(s)` links only; titles and notes are inserted as text, not HTML.
 - D1 is eventually consistent across Cloudflare locations; the dashboard's 15-second refresh
   is usually enough for a household list.

@@ -547,6 +547,89 @@ textarea {
   text-align: right;
 }
 
+.price {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.button-small {
+  padding: 4px 12px;
+  font-size: 13px;
+}
+
+.request-edit {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.edit-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+}
+
+.edit-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.edit-field label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.edit-field input,
+.edit-field textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.edit-field textarea {
+  resize: vertical;
+  min-height: 64px;
+}
+
+.edit-field input[aria-invalid="true"],
+.edit-field textarea[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.edit-field .field-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.edit-note {
+  grid-column: 1 / -1;
+}
+
+.edit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.edit-actions .button-primary {
+  width: auto;
+  margin-top: 0;
+}
+
 .empty {
   margin: 0;
   padding: 32px 20px;
@@ -640,5 +723,9 @@ textarea {
     flex-basis: 100%;
     max-width: none;
     text-align: left;
+  }
+
+  .edit-grid {
+    grid-template-columns: 1fr;
   }
 }

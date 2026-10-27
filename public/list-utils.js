@@ -7,7 +7,7 @@
 (function (global) {
   'use strict';
 
-  const SORT_OPTIONS = ['newest', 'oldest', 'title', 'quantity', 'status'];
+  const SORT_OPTIONS = ['newest', 'oldest', 'title', 'quantity', 'price', 'status'];
 
   // Workflow order, not alphabetical order.
   const STATUS_ORDER = ['New', 'Purchased', 'Done', 'Not buying'];
@@ -29,6 +29,15 @@
   function statusRank(request) {
     const index = STATUS_ORDER.indexOf(request.status);
     return index === -1 ? STATUS_ORDER.length : index;
+  }
+
+  // Requests without a price sort after every priced request.
+  function price(request) {
+    if (request.price === null || request.price === undefined || request.price === '') {
+      return -Infinity;
+    }
+    const value = Number(request.price);
+    return Number.isFinite(value) ? value : -Infinity;
   }
 
   function matchesQuery(request, query) {
@@ -55,6 +64,12 @@
       }
       case 'quantity':
         return quantity(b) - quantity(a) || left.index - right.index;
+      case 'price': {
+        const ap = price(a);
+        const bp = price(b);
+        if (ap !== bp) return ap > bp ? -1 : 1;
+        return left.index - right.index;
+      }
       case 'status':
         return statusRank(a) - statusRank(b) || left.index - right.index;
       case 'newest':

@@ -56,8 +56,9 @@ npx wrangler deploy
   it in `wrangler.jsonc`, `.dev.vars`, build commands, source, or tests.
 - The extension stores the app password locally in `chrome.storage.local` (key `appPassword`).
   This is a deliberate, family-only accepted risk. The value must never be committed or
-  hardcoded, and it is used only for `POST /api/requests` from the extension via the
-  `X-App-Password` header. Do not send it to any other endpoint.
+  hardcoded, and it is used only for `GET` and `POST /api/requests` from the extension via the
+  `X-App-Password` header (GET supports the duplicate warning). Do not send it to any other
+  endpoint; PATCH still requires the session cookie.
 - The local server has no authentication. Bind it only to loopback. Never tunnel,
   port-forward, reverse-proxy, or bind it to `0.0.0.0`.
 - Do not commit `data/`, `.dev.vars`, secrets, or build output. Preserve `.gitignore`.
@@ -70,7 +71,10 @@ npx wrangler deploy
   dashboard does not prompt for a password.
 - The extension submits remote requests itself: it POSTs to
   `https://buy-this-for-me.m-vaz-mota.workers.dev/api/requests` with the `X-App-Password`
-  header. There is no dashboard tab or `#draft` fragment handoff.
+  header, and reads the same route with that header to warn about duplicate links. There is
+  no dashboard tab or `#draft` fragment handoff.
+- `price` is optional, nullable, and stored as a plain number (at most 2 decimals). The
+  dashboard displays it with two decimals and no currency symbol.
 - Keep changes consistent with the existing plain Node/browser JavaScript style. Do not add a
   framework or front-end build step without explicit approval.
 

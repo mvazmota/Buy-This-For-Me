@@ -134,6 +134,44 @@ button:disabled {
   font-weight: 600;
 }
 
+.duplicate-warning {
+  margin-top: 10px;
+  padding: 9px 10px;
+  border: 1px solid #d9a441;
+  border-radius: 6px;
+  background: var(--warn-soft);
+  color: #6b4200;
+  font-size: 12px;
+}
+
+.duplicate-message {
+  margin: 0;
+}
+
+.duplicate-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.button-inline {
+  width: auto;
+  flex: 1;
+  margin-top: 0;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.button-secondary {
+  border: 1px solid var(--border);
+  background: #ffffff;
+  color: var(--accent);
+}
+
+.button-secondary:hover:not(:disabled) {
+  background: #f3f7fa;
+}
+
 footer {
   margin-top: 14px;
   padding-top: 10px;

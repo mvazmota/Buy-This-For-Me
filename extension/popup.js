@@ -5,6 +5,7 @@ let backendUrl = DEFAULT_BACKEND_URL;
 const form = document.getElementById('request-form');
 const titleInput = document.getElementById('title');
 const quantityInput = document.getElementById('quantity');
+const priceInput = document.getElementById('price');
 const noteInput = document.getElementById('note');
 const urlInput = document.getElementById('url');
 const submitButton = document.getElementById('submit');
@@ -13,13 +14,20 @@ const pageHint = document.getElementById('page-hint');
 const backendHint = document.getElementById('backend-hint');
 const dashboardLink = document.getElementById('dashboard-link');
 const optionsLink = document.getElementById('options-link');
+const duplicateWarning = document.getElementById('duplicate-warning');
+const duplicateMessage = document.getElementById('duplicate-message');
+const duplicateAddButton = document.getElementById('duplicate-add');
+const duplicateCancelButton = document.getElementById('duplicate-cancel');
 
 const fieldErrors = {
   title: document.getElementById('title-error'),
   quantity: document.getElementById('quantity-error'),
+  price: document.getElementById('price-error'),
   note: document.getElementById('note-error'),
   url: document.getElementById('url-error'),
 };
+
+let pendingPayload = null;
 
 function showStatus(message, kind = 'error') {
   statusEl.replaceChildren();
@@ -45,6 +53,21 @@ function clearStatus() {
   statusEl.hidden = true;
   statusEl.textContent = '';
   statusEl.dataset.kind = '';
+}
+
+function showDuplicateWarning(message) {
+  duplicateMessage.textContent = message;
+  duplicateWarning.hidden = false;
+}
+
+function hideDuplicateWarning() {
+  duplicateWarning.hidden = true;
+  duplicateMessage.textContent = '';
+}
+
+function cancelDuplicate() {
+  pendingPayload = null;
+  hideDuplicateWarning();
 }
 
 function clearFieldErrors() {
@@ -92,6 +115,7 @@ function validate() {
   const url = urlInput.value.trim();
   const note = noteInput.value.trim();
   const quantityRaw = quantityInput.value.trim();
+  const priceRaw = priceInput.value.trim();
 
   if (!title) {
     errors.title = 'Title is required.';
@@ -101,6 +125,8 @@ function validate() {
 
   if (!url) {
     errors.url = 'Link is required.';
+  } else if (url.length > 2048) {
+    errors.url = 'Link must be 2048 characters or fewer.';
   } else if (!isHttpUrl(url)) {
     errors.url = 'Link must be a valid http:// or https:// address.';
   }
@@ -114,13 +140,26 @@ function validate() {
     errors.quantity = 'Quantity must be a whole number from 1 to 999.';
   }
 
+  let price = null;
+  if (priceRaw) {
+    price = Number(priceRaw);
+    if (!Number.isFinite(price) || price < 0 || price > 1000000) {
+      errors.price = 'Price must be a number from 0 to 1000000.';
+    } else if (Math.abs(price * 100 - Math.round(price * 100)) > 1e-6) {
+      errors.price = 'Price can have at most 2 decimals.';
+    }
+  }
+
   setFieldErrors(errors);
   if (Object.keys(errors).length > 0) {
     showStatus('Please fix the highlighted fields.', 'error');
     return null;
   }
 
-  return { title, url, note, quantity };
+  const payload = { title, url, note, quantity };
+  // Only send a price when the user entered one; otherwise leave the default null.
+  if (price !== null) payload.price = price;
+  return payload;
 }
 
 async function applyBackend() {
@@ -252,23 +291,104 @@ async function sendToRemote(payload) {
   }
 }
 
+async function fetchKnownRequests() {
+  const headers = {};
+  if (!isLocalBackend(backendUrl)) {
+    const password = await getAppPassword();
+    if (!password) throw new Error('no app password is saved');
+    headers['X-App-Password'] = password;
+  }
+
+  const response = await fetch(`${backendUrl}/api/requests`, {
+    headers,
+    cache: 'no-store',
+  });
+  if (!response.ok) {
+    throw new Error(`the server returned ${response.status}`);
+  }
+
+  const data = await response.json().catch(() => ({}));
+  if (!Array.isArray(data.requests)) {
+    throw new Error('the server response was not a request list');
+  }
+  return data.requests;
+}
+
+/**
+ * Look for an existing request with the same normalized link. A failure here
+ * must not block submission: the caller offers "Add anyway" instead.
+ */
+async function checkDuplicate(url) {
+  try {
+    const requests = await fetchKnownRequests();
+    const duplicate = BIFMUrl.findDuplicateRequest(requests, url);
+    return duplicate ? { status: 'duplicate', request: duplicate } : { status: 'none' };
+  } catch (err) {
+    return { status: 'error', message: err.message };
+  }
+}
+
+async function sendPayload(payload) {
+  return isLocalBackend(backendUrl) ? sendToLocal(payload) : sendToRemote(payload);
+}
+
+async function finishSend(payload) {
+  const ok = await sendPayload(payload);
+  if (ok) await prefillFromActiveTab();
+  return ok;
+}
+
 async function submitRequest(event) {
   event.preventDefault();
   clearStatus();
   clearFieldErrors();
+  cancelDuplicate();
 
   const payload = validate();
   if (!payload) return;
 
   submitButton.disabled = true;
-  submitButton.textContent = 'Sending…';
+  submitButton.textContent = 'Checking…';
 
   try {
     await backendReady;
-    const ok = isLocalBackend(backendUrl)
-      ? await sendToLocal(payload)
-      : await sendToRemote(payload);
-    if (ok) await prefillFromActiveTab();
+    const check = await checkDuplicate(payload.url);
+
+    if (check.status === 'duplicate') {
+      pendingPayload = payload;
+      showDuplicateWarning(
+        `“${check.request.title}” is already on the list (${check.request.status}). ` +
+          'Add it anyway?'
+      );
+      return;
+    }
+
+    if (check.status === 'error') {
+      pendingPayload = payload;
+      showDuplicateWarning(
+        `Could not check for duplicates (${check.message}). Send anyway?`
+      );
+      return;
+    }
+
+    await finishSend(payload);
+  } finally {
+    submitButton.disabled = false;
+    submitButton.textContent = 'Send request';
+  }
+}
+
+async function confirmDuplicate() {
+  if (!pendingPayload) return;
+
+  const payload = pendingPayload;
+  pendingPayload = null;
+  hideDuplicateWarning();
+
+  submitButton.disabled = true;
+  submitButton.textContent = 'Sending…';
+  try {
+    await finishSend(payload);
   } finally {
     submitButton.disabled = false;
     submitButton.textContent = 'Send request';
@@ -278,6 +398,8 @@ async function submitRequest(event) {
 const backendReady = applyBackend();
 
 form.addEventListener('submit', submitRequest);
+duplicateAddButton.addEventListener('click', confirmDuplicate);
+duplicateCancelButton.addEventListener('click', cancelDuplicate);
 optionsLink.addEventListener('click', (event) => {
   event.preventDefault();
   chrome.runtime.openOptionsPage();

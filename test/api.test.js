@@ -8,7 +8,7 @@ const http = require('node:http');
 const test = require('node:test');
 
 const { createApp } = require('../lib/app');
-const { validateNewRequest } = require('../lib/validate');
+const { validateNewRequest, validateRequestUpdate } = require('../lib/validate');
 
 function makeTempDataFile() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bifm-test-'));
@@ -172,6 +172,122 @@ test('PATCH /api/requests/:id updates status', async () => {
     const listed = await (await fetch(`${base}/api/requests`)).json();
     assert.equal(listed.requests[0].status, 'Purchased');
   });
+});
+
+test('PATCH edits any subset of fields and keeps the status-only behaviour', async () => {
+  await withServer(async ({ base }) => {
+    const created = await (await postJson(base, validPayload)).json();
+    const original = created.request;
+
+    const edited = await fetch(`${base}/api/requests/${original.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: '  Running shoes (wide) ',
+        url: 'https://example.com/shoes/wide',
+        note: 'Size 44',
+        quantity: 3,
+        price: 59.95,
+      }),
+    });
+    assert.equal(edited.status, 200);
+    const { request: updated } = await edited.json();
+    assert.equal(updated.id, original.id);
+    assert.equal(updated.title, 'Running shoes (wide)');
+    assert.equal(updated.url, 'https://example.com/shoes/wide');
+    assert.equal(updated.note, 'Size 44');
+    assert.equal(updated.quantity, 3);
+    assert.equal(updated.price, 59.95);
+    assert.equal(updated.status, 'New');
+    assert.equal(updated.submittedAt, original.submittedAt);
+    assert.ok(Date.parse(updated.updatedAt) >= Date.parse(original.updatedAt));
+
+    const partial = await fetch(`${base}/api/requests/${original.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Running shoes v2' }),
+    });
+    assert.equal(partial.status, 200);
+    const afterPartial = (await partial.json()).request;
+    assert.equal(afterPartial.title, 'Running shoes v2');
+    assert.equal(afterPartial.price, 59.95);
+    assert.equal(afterPartial.quantity, 3);
+
+    const cleared = await fetch(`${base}/api/requests/${original.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ price: null }),
+    });
+    assert.equal(cleared.status, 200);
+    assert.equal((await cleared.json()).request.price, null);
+
+    const statusOnly = await fetch(`${base}/api/requests/${original.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'Done' }),
+    });
+    assert.equal(statusOnly.status, 200);
+    const afterStatus = (await statusOnly.json()).request;
+    assert.equal(afterStatus.status, 'Done');
+    assert.equal(afterStatus.title, 'Running shoes v2');
+    assert.equal(afterStatus.price, null);
+
+    const listed = await (await fetch(`${base}/api/requests`)).json();
+    assert.equal(listed.requests[0].status, 'Done');
+    assert.equal(listed.requests[0].title, 'Running shoes v2');
+  });
+});
+
+test('PATCH rejects empty bodies, unknown fields only, and invalid fields', async () => {
+  await withServer(async ({ base }) => {
+    const created = await (await postJson(base, validPayload)).json();
+    const id = created.request.id;
+
+    for (const body of [{}, { unknown: true }, { title: '   ' }, { price: -1 }, { quantity: 0 }]) {
+      const response = await fetch(`${base}/api/requests/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      assert.equal(response.status, 400, `expected 400 for ${JSON.stringify(body)}`);
+      assert.ok((await response.json()).details);
+    }
+
+    const unchanged = await (await fetch(`${base}/api/requests`)).json();
+    assert.equal(unchanged.requests[0].title, validPayload.title);
+    assert.equal(unchanged.requests[0].status, 'New');
+  });
+});
+
+test('price is optional, stored as a number, and validated like the server', async () => {
+  await withServer(async ({ base }) => {
+    const withoutPrice = await (await postJson(base, validPayload)).json();
+    assert.equal(withoutPrice.request.price, null);
+
+    const withPrice = await (await postJson(base, { ...validPayload, price: 12.99 })).json();
+    assert.equal(withPrice.request.price, 12.99);
+
+    const zero = await (await postJson(base, { ...validPayload, price: 0 })).json();
+    assert.equal(zero.request.price, 0);
+
+    for (const price of [-1, 1000000.01, 12.999, '12.99', true]) {
+      const response = await postJson(base, { ...validPayload, price });
+      assert.equal(response.status, 400, `expected 400 for price ${String(price)}`);
+      assert.ok((await response.json()).details.price);
+    }
+  });
+});
+
+test('validateRequestUpdate requires a field and applies POST field rules', () => {
+  assert.equal(validateRequestUpdate({}).ok, false);
+  assert.equal(validateRequestUpdate({ unknown: 'x' }).ok, false);
+  assert.equal(validateRequestUpdate(null).ok, false);
+  assert.equal(validateRequestUpdate({ status: 'Purchased' }).ok, true);
+  assert.deepEqual(validateRequestUpdate({ status: 'Purchased' }).value, { status: 'Purchased' });
+  assert.equal(validateRequestUpdate({ title: 'A', price: 1.5 }).ok, true);
+  assert.equal(validateRequestUpdate({ price: 1.234 }).ok, false);
+  assert.equal(validateRequestUpdate({ price: null }).ok, true);
+  assert.equal(validateRequestUpdate({ url: 'javascript:alert(1)' }).ok, false);
 });
 
 test('PATCH rejects invalid status and unknown id', async () => {
