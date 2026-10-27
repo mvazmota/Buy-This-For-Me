@@ -6,9 +6,6 @@ const form = document.getElementById('request-form');
 const titleInput = document.getElementById('title');
 const quantityInput = document.getElementById('quantity');
 const priceInput = document.getElementById('price');
-const priceDisplay = document.getElementById('price-display');
-const priceHint = document.getElementById('price-hint');
-const priceCheck = document.getElementById('price-check');
 const noteInput = document.getElementById('note');
 const urlInput = document.getElementById('url');
 const submitButton = document.getElementById('submit');
@@ -107,29 +104,6 @@ function isHttpUrl(value) {
   }
 }
 
-const PRICE_AUTOFILL_HINT = 'Found';
-
-function hidePriceHint() {
-  priceHint.hidden = true;
-  priceHint.textContent = '';
-  priceCheck.hidden = true;
-}
-
-function showPriceHint(message) {
-  priceHint.textContent = message;
-  priceHint.hidden = false;
-  priceCheck.hidden = false;
-}
-
-/** Show the typed/auto-filled price as a euro amount (input stays numeric). */
-function updatePriceDisplay() {
-  const raw = priceInput.value.trim();
-  const formatted =
-    raw && typeof BIFMPrice !== 'undefined' && BIFMPrice ? BIFMPrice.formatPrice(raw) : '';
-  priceDisplay.textContent = formatted;
-  priceDisplay.hidden = !formatted;
-}
-
 function pickPriceResult(results) {
   if (!Array.isArray(results)) return null;
   for (const entry of results) {
@@ -178,8 +152,6 @@ async function autoFillPriceFromPage(tab) {
     if (priceInput.value.trim() !== '') return;
 
     priceInput.value = price.toFixed(2);
-    updatePriceDisplay();
-    showPriceHint(PRICE_AUTOFILL_HINT);
   } catch {
     // Injection can be denied (edge://, chrome://, restricted pages) or the
     // page may not allow scripts. Leave the field empty with no error.
@@ -290,8 +262,6 @@ async function prefillFromActiveTab() {
 function resetFormAfterSuccess() {
   form.reset();
   quantityInput.value = '1';
-  hidePriceHint();
-  updatePriceDisplay();
 }
 
 async function sendToLocal(payload) {
@@ -486,10 +456,6 @@ const backendReady = applyBackend();
 form.addEventListener('submit', submitRequest);
 duplicateAddButton.addEventListener('click', confirmDuplicate);
 duplicateCancelButton.addEventListener('click', cancelDuplicate);
-priceInput.addEventListener('input', () => {
-  updatePriceDisplay();
-  hidePriceHint();
-});
 optionsLink.addEventListener('click', (event) => {
   event.preventDefault();
   chrome.runtime.openOptionsPage();

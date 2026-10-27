@@ -88,13 +88,13 @@ extension settings. The local server binds to loopback only.
 5. The extension **BIFM Shopping Requests** appears. Pin it if you want one-click access.
 6. Open a normal product page (`http://` or `https://`), click the extension icon. The popup
    pre-fills the page title and link.
-7. Edit the title if needed, set quantity (default 1), add an optional price and note, then
+7. Edit the title if needed, set quantity (default 1), add an optional price and notes, then
    click **Send request**. Prices are euros. When the product page exposes a machine-readable
    price (JSON-LD, `product:price:amount`/`og:price:amount` meta tags, or `itemprop="price"`),
-   the popup fills the empty price field and shows a compact "Found 12,99 € · check it" line.
-   **Always check it**: extraction is best effort, it never overwrites a price you typed, and
-   it silently does nothing on pages that expose no price. By default this sends directly to
-   the online Worker, so save the app password in the extension settings first (section 2).
+   the popup fills the empty price field. Extraction is best effort: it never overwrites a
+   price you typed, and it silently does nothing on pages that expose no price. By default
+   this sends directly to the online Worker, so save the app password in the extension
+   settings first (section 2).
    See below to switch to the local server. Before sending, the popup reads the list and warns
    when the same normalized link is already there; choose **Add anyway** or **Cancel**.
 8. Open the dashboard to see it. The popup footer links to the configured dashboard.
@@ -146,8 +146,8 @@ price lookup is skipped.
 
 - Requests are listed **newest first**.
 - Each card shows the title (clickable original link), quantity, optional price, optional
-  note, submitted time, and a status menu.
-- **Edit** opens an inline form for title, URL, note, quantity and price. **Save** or
+  notes, submitted time, and a status menu.
+- **Edit** opens an inline form for title, URL, notes, quantity and price. **Save** or
   **Cancel**; field errors appear under the form and match the server limits.
 - Prices are euros and display with EUR formatting (`pt-PT`, e.g. `12,99 €`) on the card and
   under the price field while editing. They are stored as plain numbers and can be cleared
@@ -443,7 +443,7 @@ URL never reaches the online Worker.
 - Automatic price lookup is heuristic: it reads JSON-LD `Product` offers, price meta tags and
   `itemprop="price"` from the active tab, accepts euro or unlabelled amounts, and never
   overwrites a typed price. It can pick a wrong amount (for example a strike-through or a
-  per-unit price), so the popup always asks you to check it. Pages that hide prices behind
+  per-unit price), so check the price field before sending. Pages that hide prices behind
   scripts or a login simply produce no suggestion.
 - D1 is eventually consistent across Cloudflare locations; the dashboard's 15-second refresh
   is usually enough for a household list.

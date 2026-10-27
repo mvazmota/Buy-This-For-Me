@@ -19,9 +19,9 @@
  *   6. Class/id heuristics on visible elements ("price" in class or id).
  *   7. Last-resort visible text, e.g. "12,99 €" in an anonymous element.
  *
- * Heuristics guess. The popup shows "Price found on the page — check it." and
- * the user confirms before saving, so a wrong guess costs one edit rather than
- * a wrong request. That is why the generic stages stay conservative: they only
+ * Heuristics guess. The popup fills the price field and the user confirms
+ * before saving, so a wrong guess costs one edit rather than a wrong request.
+ * That is why the generic stages stay conservative: they only
  * accept a euro marker or an exact 2-decimal amount, and they skip old prices,
  * shipping, fees, discount badges and header/nav/footer/aside regions.
  *

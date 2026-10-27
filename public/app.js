@@ -393,7 +393,7 @@ function createEditForm(request) {
     }),
     note: createEditField(request, {
       name: 'note',
-      label: 'Note (optional)',
+      label: 'Notes (optional)',
       value: request.note,
       multiline: true,
       maxLength: LIMITS.note,
