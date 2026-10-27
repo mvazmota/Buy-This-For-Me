@@ -255,10 +255,27 @@ textarea {
   font-size: 12px;
 }
 
+/* Auto-filled price feedback: one compact line under the price input,
+   e.g. "Found 12,99 € · check it". */
+.price-feedback {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 4px;
+  margin: 3px 0 0;
+  font-size: 12px;
+  line-height: 1.15;
+}
+
 .price-display {
-  margin: 5px 0 0;
+  color: var(--text);
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.price-hint,
+.price-check {
   color: var(--muted);
-  font-size: 11.5px;
 }
 
 button {

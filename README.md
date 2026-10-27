@@ -91,7 +91,7 @@ extension settings. The local server binds to loopback only.
 7. Edit the title if needed, set quantity (default 1), add an optional price and note, then
    click **Send request**. Prices are euros. When the product page exposes a machine-readable
    price (JSON-LD, `product:price:amount`/`og:price:amount` meta tags, or `itemprop="price"`),
-   the popup fills the empty price field and shows "Price found on the page — check it."
+   the popup fills the empty price field and shows a compact "Found 12,99 € · check it" line.
    **Always check it**: extraction is best effort, it never overwrites a price you typed, and
    it silently does nothing on pages that expose no price. By default this sends directly to
    the online Worker, so save the app password in the extension settings first (section 2).

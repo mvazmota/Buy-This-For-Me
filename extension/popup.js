@@ -8,6 +8,7 @@ const quantityInput = document.getElementById('quantity');
 const priceInput = document.getElementById('price');
 const priceDisplay = document.getElementById('price-display');
 const priceHint = document.getElementById('price-hint');
+const priceCheck = document.getElementById('price-check');
 const noteInput = document.getElementById('note');
 const urlInput = document.getElementById('url');
 const submitButton = document.getElementById('submit');
@@ -106,16 +107,18 @@ function isHttpUrl(value) {
   }
 }
 
-const PRICE_AUTOFILL_HINT = 'Price found on the page — check it.';
+const PRICE_AUTOFILL_HINT = 'Found';
 
 function hidePriceHint() {
   priceHint.hidden = true;
   priceHint.textContent = '';
+  priceCheck.hidden = true;
 }
 
 function showPriceHint(message) {
   priceHint.textContent = message;
   priceHint.hidden = false;
+  priceCheck.hidden = false;
 }
 
 /** Show the typed/auto-filled price as a euro amount (input stays numeric). */

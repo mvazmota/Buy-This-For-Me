@@ -505,10 +505,8 @@ test('popup auto-fills an empty price from the page and shows a euro hint', asyn
 
   assert.equal(context.elements.get('price').value, '12.50');
   assert.equal(context.elements.get('price-hint').hidden, false);
-  assert.equal(
-    context.elements.get('price-hint').textContent,
-    'Price found on the page — check it.'
-  );
+  assert.equal(context.elements.get('price-hint').textContent, 'Found');
+  assert.equal(context.elements.get('price-check').hidden, false);
   const display = context.elements.get('price-display');
   assert.equal(display.hidden, false);
   assert.equal(
@@ -556,6 +554,7 @@ test('auto-fill is silent when no price is found or injection is denied', async 
   await flushAsync();
   assert.equal(denied.elements.get('price').value, '');
   assert.equal(denied.elements.get('price-hint').textContent, '');
+  assert.equal(denied.elements.get('price-display').textContent, '');
 });
 
 test('auto-fill skips pages that are not http or https', async () => {
