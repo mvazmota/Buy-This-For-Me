@@ -25,6 +25,7 @@ lib/app.js                   local HTTP routes, validation wiring, static dashbo
 lib/validate.js              shared request/status validation rules
 lib/store.js                 local JSON storage with atomic, serialized writes
 src/worker.js                Cloudflare Worker API + static asset handler
+src/notify.js                ntfy push notification message builder and sender
 src/session.js               HMAC-signed session cookies (WebCrypto)
 src/package.json             marks src/ as ESM for Node syntax checks
 migrations/                  D1 migrations (apply with Wrangler)
@@ -35,6 +36,7 @@ extension/url-utils.js       canonical URL normalization for the duplicate warni
 extension/price-extractor.js reads a product price from the page; euro price formatting
 test/api.test.js             local API tests using node:test
 test/worker.test.js          Worker auth/API tests using a fake D1
+test/notify.test.js          ntfy message and sender tests with a fake fetch
 test/price.test.js           price extraction and euro formatting tests
 data/requests.json           created automatically on first local save (ignored by git)
 ```
@@ -241,11 +243,12 @@ npm test
 npm run check
 ```
 
-`npm test` runs local API tests, Worker auth/API tests, extension popup/duplicate tests,
-dashboard list/sort tests and price extraction/formatting tests. The Worker tests use a fake
-D1 binding, not a live Cloudflare account. The price tests use a minimal fake document; they
-do not load a real store page. `npm run check` runs `node --check` over the Worker, session
-helper, dashboard scripts and extension scripts.
+`npm test` runs local API tests, Worker auth/API tests, ntfy notification tests, extension
+popup/duplicate tests, dashboard list/sort tests and price extraction/formatting tests. The
+Worker and notification tests use a fake D1 binding and a fake fetch, not a live Cloudflare
+account or a real ntfy server. The price tests use a minimal fake document; they do not load a
+real store page. `npm run check` runs `node --check` over the Worker, notification sender,
+session helper, dashboard scripts and extension scripts.
 
 Apply migrations to the local D1 copy (no Cloudflare account needed) with
 `npx wrangler d1 migrations apply buy-this-for-me --local`.
@@ -353,7 +356,42 @@ URL and the same password in the extension settings (section 2) and send a test 
 a product page. If login returns "Login is not available", the `APP_PASSWORD` secret is
 missing for that Worker.
 
-### 7.6 Connect Cloudflare Workers Builds to GitHub
+### 7.6 Push notifications with ntfy (optional)
+
+New requests can be pushed to your phone through [ntfy.sh](https://ntfy.sh). Only the online
+Worker sends them; the local server has no ntfy configuration and never notifies.
+
+1. Install the ntfy app for Android or iOS (or open <https://ntfy.sh/app>).
+2. Choose a long random topic name and subscribe to it in the app:
+   ```powershell
+   node -e "console.log(require('crypto').randomBytes(16).toString('base64url'))"
+   ```
+3. Save that name as a Worker secret:
+   ```powershell
+   npx wrangler secret put NTFY_TOPIC
+   ```
+4. No redeploy is needed for a secret: `wrangler secret put` updates the running Worker.
+5. Add a request from the extension or the dashboard and check the phone.
+
+Each notification is titled `New shopping request`, carries the `shopping_cart` tag, and opens
+the dashboard when tapped. Its text is the item title, then `Qty 2 · 12.99` when a quantity or
+price is set, then the product link.
+
+- One notification per successful `POST /api/requests`, from either the dashboard login cookie
+  or the extension's `X-App-Password` header. `PATCH` and `DELETE` never notify.
+- The send runs after the API response (`ctx.waitUntil`), so a slow or broken ntfy never delays
+  or fails the request. Missing `NTFY_TOPIC` silently disables notifications; an ntfy error is
+  logged briefly without the topic and changes nothing.
+- `NTFY_SERVER` is optional. It defaults to `https://ntfy.sh`; set it as a plain Worker
+  variable only for a self-hosted instance, and it must be `https://` or notifications are
+  skipped.
+- The body is capped at 300 characters: a note is only included when it still fits, and the
+  product link is dropped before the title is shortened.
+
+**The topic is effectively a password.** Anyone who knows it can read your notifications. Use a
+long random name, never paste it in chat, and never commit it.
+
+### 7.7 Connect Cloudflare Workers Builds to GitHub
 
 The repository for this project is `mvazmota/Buy-This-For-Me`, production branch `main`.
 
@@ -392,7 +430,7 @@ From then on every push to `main` runs the build and deploy commands, so you no 
 by hand. Builds never applies D1 migrations: run the `--remote` migration from step 7.3
 yourself before pushing code that needs a new one.
 
-### 7.7 Verify the deployment
+### 7.8 Verify the deployment
 
 1. `GET https://buy-this-for-me.m-vaz-mota.workers.dev/api/health` in a browser or with curl
    should return `{"ok":true}`.
@@ -404,7 +442,7 @@ yourself before pushing code that needs a new one.
 5. Log out and confirm the list is no longer shown.
 6. Wrong passwords must show a generic failure, never the configured password.
 
-### 7.8 Point the extension at the Worker
+### 7.9 Point the extension at the Worker
 
 The extension already uses `https://buy-this-for-me.m-vaz-mota.workers.dev` by default, so no
 setting is needed unless you previously saved another URL.
@@ -435,6 +473,9 @@ URL never reaches the online Worker.
   `chrome.storage.local` in this browser profile for direct submissions (family-only accepted
   risk). It is never committed to git and never hardcoded in source. Do not reuse an important
   password.
+- `NTFY_TOPIC` is a Worker secret and is never committed. The topic is effectively a password:
+  anyone who knows it can read the notifications. It is never returned in an API response or
+  written to a log, and the notification body is capped at 300 characters.
 - There is no rate limiting on login or on extension submissions. Choose a long random password.
 - No deleting of existing requests, no categories, no purchase dates. The popup warns about a
   matching normalized link but does not block duplicates; it does not queue or retry failed

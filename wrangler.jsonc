@@ -26,4 +26,10 @@
 	"observability": {
 		"enabled": true
 	}
+	// Optional push notifications through ntfy (see README section 7.6).
+	// Only the names live here; never store values in this file.
+	//   NTFY_TOPIC   - Worker secret, required to send:
+	//                  npx wrangler secret put NTFY_TOPIC
+	//   NTFY_SERVER  - optional plain var, defaults to https://ntfy.sh when unset;
+	//                  a non-https value makes the Worker skip notifications.
 }

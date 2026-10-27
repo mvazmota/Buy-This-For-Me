@@ -104,8 +104,47 @@ function createFakeD1() {
   };
 }
 
-function envWithDb() {
-  return { APP_PASSWORD: PASSWORD, DB: createFakeD1(), ASSETS: { fetch: async () => new Response('asset') } };
+function envWithDb(extra = {}) {
+  return {
+    APP_PASSWORD: PASSWORD,
+    DB: createFakeD1(),
+    ASSETS: { fetch: async () => new Response('asset') },
+    ...extra,
+  };
+}
+
+/** Collect the ntfy POSTs the Worker makes through the global fetch. */
+function createFakeNtfyFetch(response = { ok: true, status: 200 }) {
+  const calls = [];
+  const impl = async (url, options) => {
+    calls.push({ url: String(url), options });
+    return response;
+  };
+  impl.calls = calls;
+  return impl;
+}
+
+/** The Worker sends ntfy through the global fetch, so swap it for the test. */
+async function withFakeFetch(fetchImpl, fn) {
+  const original = globalThis.fetch;
+  globalThis.fetch = fetchImpl;
+  try {
+    return await fn();
+  } finally {
+    globalThis.fetch = original;
+  }
+}
+
+async function quietly(fn) {
+  const original = console.error;
+  const messages = [];
+  console.error = (...args) => messages.push(args.join(' '));
+  try {
+    const value = await fn();
+    return { value, messages };
+  } finally {
+    console.error = original;
+  }
 }
 
 workerTest('session tokens are signed, expiring and tamper-evident', async () => {
@@ -564,4 +603,210 @@ workerTest('the item route keeps a JSON 405 for non-PATCH/DELETE methods', async
       error: 'Method not allowed. Use PATCH or DELETE.',
     });
   }
+});
+
+workerTest('a create with an app password notifies ntfy once and still returns 201', async () => {
+  const worker = (await loadWorker()).default;
+  const topic = 'bifm-test-topic-app-password';
+  const env = envWithDb({ NTFY_TOPIC: topic });
+  const ntfy = createFakeNtfyFetch();
+
+  const response = await withFakeFetch(ntfy, () =>
+    worker.fetch(
+      new Request(`${WORKER_URL}/api/requests`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Origin: 'chrome-extension://abc',
+          'X-App-Password': PASSWORD,
+        },
+        body: JSON.stringify({
+          title: 'Running shoes',
+          url: 'https://example.com/shoes',
+          quantity: 2,
+          price: 12.99,
+        }),
+      }),
+      env
+    )
+  );
+
+  assert.equal(response.status, 201);
+  assert.equal((await readJson(response)).request.title, 'Running shoes');
+
+  assert.equal(ntfy.calls.length, 1);
+  const [call] = ntfy.calls;
+  assert.equal(call.url, `https://ntfy.sh/${topic}`);
+  assert.equal(call.options.method, 'POST');
+  assert.equal(call.options.headers.Title, 'New shopping request');
+  assert.equal(call.options.headers.Tags, 'shopping_cart');
+  assert.equal(call.options.headers.Priority, 'default');
+  assert.equal(call.options.headers.Click, WORKER_URL);
+  assert.equal(
+    call.options.body,
+    'Running shoes\nQty 2 · 12.99\nhttps://example.com/shoes'
+  );
+});
+
+workerTest('a cookie-authenticated create defers the notification to ctx.waitUntil', async () => {
+  const worker = (await loadWorker()).default;
+  const topic = 'bifm-test-topic-cookie';
+  const env = envWithDb({ NTFY_TOPIC: topic });
+  const ntfy = createFakeNtfyFetch();
+  const pending = [];
+  const ctx = {
+    waitUntil(promise) {
+      pending.push(promise);
+    },
+  };
+
+  const cookie = cookieFrom(await worker.fetch(login(), env));
+
+  const response = await withFakeFetch(ntfy, () =>
+    worker.fetch(
+      new Request(`${WORKER_URL}/api/requests`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: cookie },
+        body: JSON.stringify({ title: 'Bin bags', url: 'https://example.com/bags' }),
+      }),
+      env,
+      ctx
+    )
+  );
+
+  assert.equal(response.status, 201);
+  assert.equal(pending.length, 1);
+  await Promise.all(pending);
+  assert.equal(ntfy.calls.length, 1);
+  assert.equal(ntfy.calls[0].url, `https://ntfy.sh/${topic}`);
+  assert.equal(ntfy.calls[0].options.headers.Click, WORKER_URL);
+});
+
+workerTest('creating without NTFY_TOPIC sends nothing and still returns 201', async () => {
+  const worker = (await loadWorker()).default;
+  const env = envWithDb();
+  const ntfy = createFakeNtfyFetch();
+
+  const response = await withFakeFetch(ntfy, () =>
+    worker.fetch(
+      new Request(`${WORKER_URL}/api/requests`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-App-Password': PASSWORD },
+        body: JSON.stringify({ title: 'No topic', url: 'https://example.com/none' }),
+      }),
+      env
+    )
+  );
+
+  assert.equal(response.status, 201);
+  assert.equal(ntfy.calls.length, 0);
+  assert.equal(env.DB.rows.length, 1);
+});
+
+workerTest('an ntfy 500 or network error never changes the 201 response', async () => {
+  const worker = (await loadWorker()).default;
+  const topic = 'bifm-test-topic-failures';
+
+  for (const scenario of ['status', 'throw']) {
+    const env = envWithDb({ NTFY_TOPIC: topic });
+    const ntfy =
+      scenario === 'status'
+        ? createFakeNtfyFetch({ ok: false, status: 500 })
+        : async () => {
+            throw new TypeError('ntfy unreachable');
+          };
+
+    const { value: response, messages } = await quietly(() =>
+      withFakeFetch(ntfy, () =>
+        worker.fetch(
+          new Request(`${WORKER_URL}/api/requests`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-App-Password': PASSWORD },
+            body: JSON.stringify({ title: 'Fail softly', url: 'https://example.com/soft' }),
+          }),
+          env
+        )
+      )
+    );
+
+    assert.equal(response.status, 201, `${scenario} must still create the request`);
+    assert.equal((await readJson(response)).request.title, 'Fail softly');
+    assert.equal(env.DB.rows.length, 1);
+    assert.equal(messages.length, 1);
+    assert.ok(!messages[0].includes(topic), 'logs must not contain the topic');
+  }
+});
+
+workerTest('a non-https NTFY_SERVER skips the notification and still returns 201', async () => {
+  const worker = (await loadWorker()).default;
+  const env = envWithDb({
+    NTFY_TOPIC: 'bifm-test-topic-insecure',
+    NTFY_SERVER: 'http://ntfy.sh',
+  });
+  const ntfy = createFakeNtfyFetch();
+
+  const { value: response } = await quietly(() =>
+    withFakeFetch(ntfy, () =>
+      worker.fetch(
+        new Request(`${WORKER_URL}/api/requests`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-App-Password': PASSWORD },
+          body: JSON.stringify({ title: 'Insecure server', url: 'https://example.com/http' }),
+        }),
+        env
+      )
+    )
+  );
+
+  assert.equal(response.status, 201);
+  assert.equal(ntfy.calls.length, 0);
+});
+
+workerTest('PATCH and DELETE never notify ntfy', async () => {
+  const worker = (await loadWorker()).default;
+  const env = envWithDb({ NTFY_TOPIC: 'bifm-test-topic-updates' });
+  const ntfy = createFakeNtfyFetch();
+
+  const cookie = cookieFrom(await worker.fetch(login(), env));
+  const authHeaders = { 'Content-Type': 'application/json', Cookie: cookie };
+
+  const created = await withFakeFetch(ntfy, () =>
+    worker.fetch(
+      new Request(`${WORKER_URL}/api/requests`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ title: 'Edit me', url: 'https://example.com/edit' }),
+      }),
+      env
+    )
+  );
+  assert.equal(created.status, 201);
+  assert.equal(ntfy.calls.length, 1, 'the create itself notifies once');
+  const { request } = await readJson(created);
+
+  ntfy.calls.length = 0;
+
+  await withFakeFetch(ntfy, () =>
+    worker.fetch(
+      new Request(`${WORKER_URL}/api/requests/${request.id}`, {
+        method: 'PATCH',
+        headers: authHeaders,
+        body: JSON.stringify({ status: 'Purchased' }),
+      }),
+      env
+    )
+  );
+
+  const deleted = await withFakeFetch(ntfy, () =>
+    worker.fetch(
+      new Request(`${WORKER_URL}/api/requests/${request.id}`, {
+        method: 'DELETE',
+        headers: { Cookie: cookie },
+      }),
+      env
+    )
+  );
+
+  assert.equal(deleted.status, 200);
+  assert.equal(ntfy.calls.length, 0);
 });

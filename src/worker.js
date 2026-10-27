@@ -3,6 +3,7 @@
 // and store requests in D1. Everything else is served from the ASSETS binding.
 
 import validateModule from '../lib/validate.js';
+import { buildNtfyMessage, sendNtfyNotification } from './notify.js';
 import {
   COOKIE_NAME,
   clearSessionCookie,
@@ -206,7 +207,27 @@ async function isExtensionAuthorized(request, env) {
   return passwordMatches(submitted, password);
 }
 
-async function handleRequests(request, env, url, extensionAuthorized = false) {
+/**
+ * Fire an ntfy notification for a newly created request. The API response never
+ * depends on it: with a Worker ctx the send runs after the response, and the
+ * sender itself swallows every error.
+ */
+async function notifyNewRequest(env, created, origin, ctx) {
+  try {
+    if (!env || typeof env.NTFY_TOPIC !== 'string' || env.NTFY_TOPIC.trim() === '') return;
+    const message = buildNtfyMessage(created, origin);
+    const task = sendNtfyNotification(env, message);
+    if (ctx && typeof ctx.waitUntil === 'function') {
+      ctx.waitUntil(task);
+      return;
+    }
+    await task;
+  } catch {
+    // A notification problem must never affect the API response.
+  }
+}
+
+async function handleRequests(request, env, url, extensionAuthorized = false, ctx = null) {
   if (!extensionAuthorized && !(await isAuthenticated(request, env))) {
     return json({ error: 'Authentication required.' }, 401);
   }
@@ -221,7 +242,9 @@ async function handleRequests(request, env, url, extensionAuthorized = false) {
       if (!result.ok) {
         return json({ error: 'Please fix the highlighted fields.', details: result.errors }, 400);
       }
-      return json({ request: await createRequest(env, result.value) }, 201);
+      const created = await createRequest(env, result.value);
+      await notifyNewRequest(env, created, url.origin, ctx);
+      return json({ request: created }, 201);
     }
     return json({ error: 'Method not allowed. Use GET or POST.' }, 405);
   }
@@ -280,7 +303,7 @@ async function handleLogin(request, env) {
   });
 }
 
-async function handleApi(request, env, url) {
+async function handleApi(request, env, url, ctx = null) {
   // The extension talks to /api/requests directly with the app password in the
   // X-App-Password header: it reads the list to warn about duplicates and posts
   // new requests. That header only bypasses the same-origin check and the
@@ -325,14 +348,14 @@ async function handleApi(request, env, url) {
   }
 
   if (url.pathname === '/api/requests' || url.pathname.startsWith('/api/requests/')) {
-    return handleRequests(request, env, url, extensionAuthorized);
+    return handleRequests(request, env, url, extensionAuthorized, ctx);
   }
 
   return json({ error: 'API route not found.' }, 404);
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
     if (!url.pathname.startsWith('/api/')) {
@@ -343,7 +366,7 @@ export default {
     }
 
     try {
-      return await handleApi(request, env, url);
+      return await handleApi(request, env, url, ctx);
     } catch (err) {
       if (err instanceof ApiError) {
         return json({ error: err.message }, err.status);
