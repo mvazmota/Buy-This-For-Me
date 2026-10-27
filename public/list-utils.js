@@ -128,7 +128,25 @@
       .map((entry) => entry.request);
   }
 
-  const api = { filterAndSortRequests, formatPrice, SORT_OPTIONS, STATUS_ORDER };
+  /**
+   * Return a new array without the request that has the given id.
+   *
+   * Other items keep their relative order. An unknown id (or a non-array
+   * input) is a no-op: the result still holds the same items in the same order.
+   *
+   * @param {Array<object>} requests
+   * @param {string} id
+   * @returns {Array<object>}
+   */
+  function removeRequestById(requests, id) {
+    const source = Array.isArray(requests) ? requests : [];
+    if (typeof id !== 'string' || !id) return source.slice();
+    return source.filter(
+      (request) => !(request && typeof request === 'object' && request.id === id)
+    );
+  }
+
+  const api = { filterAndSortRequests, formatPrice, removeRequestById, SORT_OPTIONS, STATUS_ORDER };
 
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = api;

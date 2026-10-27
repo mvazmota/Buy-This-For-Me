@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { filterAndSortRequests, formatPrice } = require('../public/list-utils');
+const { filterAndSortRequests, formatPrice, removeRequestById } = require('../public/list-utils');
 
 // Same options as public/list-utils.js; keeps the assertions locale-stable.
 const EURO = new Intl.NumberFormat('pt-PT', {
@@ -196,6 +196,35 @@ test('handles unknown sorts, missing options, and non-array input', () => {
   assert.deepEqual(ids(filterAndSortRequests(REQUESTS)), ['e', 'd', 'c', 'b', 'a']);
   assert.deepEqual(filterAndSortRequests(null), []);
   assert.deepEqual(filterAndSortRequests(undefined, undefined), []);
+});
+
+test('removeRequestById drops only the matching id and keeps the order of the rest', () => {
+  const removed = removeRequestById(REQUESTS, 'c');
+  assert.deepEqual(ids(removed), ['a', 'b', 'd', 'e']);
+  assert.equal(removed.length, 4);
+  assert.ok(!removed.some((request) => request.id === 'c'));
+
+  // The surviving objects are the originals, not copies.
+  assert.equal(removed[0], REQUESTS[0]);
+
+  // The input array is untouched.
+  assert.deepEqual(ids(REQUESTS), ['a', 'b', 'c', 'd', 'e']);
+  assert.notEqual(removed, REQUESTS);
+  assert.deepEqual(ids(removeRequestById(REQUESTS, 'a')), ['b', 'c', 'd', 'e']);
+  assert.deepEqual(ids(removeRequestById(REQUESTS, 'e')), ['a', 'b', 'c', 'd']);
+});
+
+test('removeRequestById is a no-op for a missing id or unusable input', () => {
+  assert.deepEqual(ids(removeRequestById(REQUESTS, 'no-such-id')), ids(REQUESTS));
+  assert.equal(removeRequestById(REQUESTS, 'no-such-id').length, REQUESTS.length);
+  assert.deepEqual(ids(removeRequestById(REQUESTS, undefined)), ids(REQUESTS));
+  assert.deepEqual(ids(removeRequestById(REQUESTS, '')), ids(REQUESTS));
+  assert.deepEqual(removeRequestById(null, 'a'), []);
+  assert.deepEqual(removeRequestById(undefined, 'a'), []);
+  assert.deepEqual(removeRequestById('nope', 'a'), []);
+
+  // Always a fresh array so callers can assign it without aliasing.
+  assert.notEqual(removeRequestById(REQUESTS, 'no-such-id'), REQUESTS);
 });
 
 test('formatPrice shows euros with two decimals and hides missing prices', () => {

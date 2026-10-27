@@ -117,6 +117,16 @@
       <p>Status changes save immediately. Use Edit to change an item.</p>
     </footer>
 
+    <dialog id="delete-dialog" class="delete-dialog" aria-labelledby="delete-dialog-title">
+      <h2 id="delete-dialog-title">Delete this request?</h2>
+      <p id="delete-dialog-item" class="delete-dialog-item"></p>
+      <p class="muted">This cannot be undone.</p>
+      <div class="delete-dialog-actions">
+        <button id="delete-cancel" type="button" class="button">Cancel</button>
+        <button id="delete-confirm" type="button" class="button button-danger">Delete</button>
+      </div>
+    </dialog>
+
     <script src="/list-utils.js"></script>
     <script src="/app.js"></script>
   </body>

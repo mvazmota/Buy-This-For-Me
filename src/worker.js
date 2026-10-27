@@ -187,6 +187,17 @@ async function updateRequest(env, id, changes) {
   return updated;
 }
 
+async function deleteRequest(env, id) {
+  // Check existence first so a missing id is a clean 404 even if the DELETE
+  // itself reports zero changed rows.
+  const existing = await env.DB.prepare('SELECT id FROM requests WHERE id = ?').bind(id).first();
+  if (!existing) return false;
+
+  const result = await env.DB.prepare('DELETE FROM requests WHERE id = ?').bind(id).run();
+  const changes = result && result.meta ? Number(result.meta.changes) : 0;
+  return changes > 0;
+}
+
 async function isExtensionAuthorized(request, env) {
   const submitted = request.headers.get('x-app-password');
   if (submitted === null) return false;
@@ -218,15 +229,21 @@ async function handleRequests(request, env, url, extensionAuthorized = false) {
   const match = url.pathname.match(/^\/api\/requests\/([^/]+)$/);
   if (!match) return json({ error: 'API route not found.' }, 404);
 
-  if (request.method !== 'PATCH') {
-    return json({ error: 'Method not allowed. Use PATCH.' }, 405);
-  }
-
   let id;
   try {
     id = decodeURIComponent(match[1]);
   } catch {
     return json({ error: 'Malformed request URL.' }, 400);
+  }
+
+  if (request.method === 'DELETE') {
+    const removed = await deleteRequest(env, id);
+    if (!removed) return json({ error: 'Request not found.' }, 404);
+    return json({ deleted: true, id });
+  }
+
+  if (request.method !== 'PATCH') {
+    return json({ error: 'Method not allowed. Use PATCH or DELETE.' }, 405);
   }
 
   const body = await readJsonBody(request);
@@ -267,7 +284,8 @@ async function handleApi(request, env, url) {
   // The extension talks to /api/requests directly with the app password in the
   // X-App-Password header: it reads the list to warn about duplicates and posts
   // new requests. That header only bypasses the same-origin check and the
-  // session cookie for GET/POST on that one route. PATCH still needs the cookie.
+  // session cookie for GET/POST on that one route. PATCH and DELETE still need
+  // the login cookie.
   const extensionPath =
     url.pathname === '/api/requests' &&
     (request.method === 'GET' || request.method === 'POST');

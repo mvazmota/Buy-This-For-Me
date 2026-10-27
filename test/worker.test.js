@@ -30,7 +30,7 @@ function cookieFrom(response) {
   return setCookie.split(';')[0];
 }
 
-/** Tiny D1 stand-in that understands the Worker's four SQL statements. */
+/** Tiny D1 stand-in that understands the Worker's SQL statements. */
 function createFakeD1() {
   const rows = [];
 
@@ -89,6 +89,12 @@ function createFakeD1() {
             if (!row) return { meta: { changes: 0 } };
             row.status = args[0];
             row.updated_at = args[1];
+            return { meta: { changes: 1 } };
+          }
+          if (/^DELETE FROM requests WHERE id = \?/i.test(sql)) {
+            const index = rows.findIndex((entry) => entry.id === args[0]);
+            if (index === -1) return { meta: { changes: 0 } };
+            rows.splice(index, 1);
             return { meta: { changes: 1 } };
           }
           throw new Error(`Unexpected run() query: ${sql}`);
@@ -457,4 +463,105 @@ workerTest('authenticated create/list/update flow stores D1 rows and keeps API s
   );
   assert.equal(invalid.status, 400);
   assert.ok((await readJson(invalid)).details.title);
+});
+
+workerTest('DELETE /api/requests/:id needs the session cookie, not the app password', async () => {
+  const worker = (await loadWorker()).default;
+  const env = envWithDb();
+
+  const anonymous = await worker.fetch(
+    new Request(`${WORKER_URL}/api/requests/some-id`, { method: 'DELETE' }),
+    env
+  );
+  assert.equal(anonymous.status, 401);
+  assert.deepEqual(await readJson(anonymous), { error: 'Authentication required.' });
+
+  // Same-origin DELETE with only the extension header must stay unauthenticated.
+  const headerOnly = await worker.fetch(
+    new Request(`${WORKER_URL}/api/requests/some-id`, {
+      method: 'DELETE',
+      headers: { 'X-App-Password': PASSWORD },
+    }),
+    env
+  );
+  assert.equal(headerOnly.status, 401);
+  assert.deepEqual(await readJson(headerOnly), { error: 'Authentication required.' });
+
+  // Cross-origin DELETE is rejected like PATCH, even with the header.
+  for (const headers of [
+    { Origin: 'https://evil.example' },
+    { Origin: 'https://evil.example', 'X-App-Password': PASSWORD },
+  ]) {
+    const crossOrigin = await worker.fetch(
+      new Request(`${WORKER_URL}/api/requests/some-id`, { method: 'DELETE', headers }),
+      env
+    );
+    assert.equal(crossOrigin.status, 403);
+    assert.match((await readJson(crossOrigin)).error, /Cross-origin/);
+  }
+
+  // The normal same-origin, cookie-authenticated path deletes the row.
+  const loginResponse = await worker.fetch(login(), env);
+  const cookie = cookieFrom(loginResponse);
+  const authHeaders = { 'Content-Type': 'application/json', Cookie: cookie };
+
+  const created = await worker.fetch(
+    new Request(`${WORKER_URL}/api/requests`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({ title: 'Bin me', url: 'https://example.com/bin' }),
+    }),
+    env
+  );
+  assert.equal(created.status, 201);
+  const { request } = await readJson(created);
+  assert.equal(env.DB.rows.length, 1);
+
+  const deleted = await worker.fetch(
+    new Request(`${WORKER_URL}/api/requests/${request.id}`, {
+      method: 'DELETE',
+      headers: { Cookie: cookie },
+    }),
+    env
+  );
+  assert.equal(deleted.status, 200);
+  assert.deepEqual(await readJson(deleted), { deleted: true, id: request.id });
+  assert.equal(env.DB.rows.length, 0);
+
+  const listed = await worker.fetch(
+    new Request(`${WORKER_URL}/api/requests`, { headers: { Cookie: cookie } }),
+    env
+  );
+  assert.deepEqual(await readJson(listed), { requests: [] });
+
+  for (const pathname of [`/api/requests/${request.id}`, '/api/requests/does-not-exist']) {
+    const missing = await worker.fetch(
+      new Request(`${WORKER_URL}${pathname}`, {
+        method: 'DELETE',
+        headers: { Cookie: cookie },
+      }),
+      env
+    );
+    assert.equal(missing.status, 404, `${pathname} should be 404`);
+    assert.deepEqual(await readJson(missing), { error: 'Request not found.' });
+  }
+});
+
+workerTest('the item route keeps a JSON 405 for non-PATCH/DELETE methods', async () => {
+  const worker = (await loadWorker()).default;
+  const env = envWithDb();
+  const loginResponse = await worker.fetch(login(), env);
+  const cookie = cookieFrom(loginResponse);
+
+  for (const method of ['PUT', 'GET', 'POST']) {
+    const response = await worker.fetch(
+      new Request(`${WORKER_URL}/api/requests/some-id`, { method, headers: { Cookie: cookie } }),
+      env
+    );
+    assert.equal(response.status, 405, `${method} should be 405`);
+    assert.match(response.headers.get('content-type') || '', /application\/json/);
+    assert.deepEqual(await readJson(response), {
+      error: 'Method not allowed. Use PATCH or DELETE.',
+    });
+  }
 });

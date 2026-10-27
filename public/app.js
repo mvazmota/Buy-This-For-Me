@@ -38,12 +38,21 @@ const loginForm = document.getElementById('login-form');
 const loginErrorEl = document.getElementById('login-error');
 const loginSubmit = document.getElementById('login-submit');
 const passwordInput = document.getElementById('password');
+const deleteDialog = document.getElementById('delete-dialog');
+const deleteDialogItem = document.getElementById('delete-dialog-item');
+const deleteConfirmButton = document.getElementById('delete-confirm');
+const deleteCancelButton = document.getElementById('delete-cancel');
 
 let refreshTimer = null;
 let authRequired = true;
 let allRequests = [];
 let lastPayload = '';
 let listState = readStoredState();
+// Set while the delete confirmation is open: { id, title, button }.
+let pendingDelete = null;
+let deleteInFlight = false;
+// Bumped after a delete so an in-flight list refresh cannot resurrect the card.
+let listRevision = 0;
 
 function readStoredState() {
   try {
@@ -190,10 +199,92 @@ function isEditing() {
   return active.matches('input, select, textarea');
 }
 
+function supportsDeleteDialog() {
+  return Boolean(deleteDialog) && typeof deleteDialog.showModal === 'function';
+}
+
+function isDeleteDialogOpen() {
+  return supportsDeleteDialog() && deleteDialog.open;
+}
+
+/**
+ * Run the DELETE call for one card. Removes the card from the local list on
+ * success and re-renders so stats, filter counts, and the empty state follow.
+ */
+async function deleteRequest(target) {
+  if (deleteInFlight) return;
+  deleteInFlight = true;
+
+  const { id, button } = target;
+  const buttonLabel = button.textContent;
+  button.disabled = true;
+  button.textContent = 'Deleting…';
+
+  try {
+    const response = await fetch(`/api/requests/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: { Accept: 'application/json' },
+    });
+    const data = await response.json().catch(() => ({}));
+
+    if (response.status === 401) {
+      showLogin({ message: 'Your session expired. Log in again to change requests.' });
+      return;
+    }
+
+    if (!response.ok) {
+      throw new Error(data.error || `Server returned ${response.status}.`);
+    }
+
+    allRequests = BIFMList.removeRequestById(allRequests, id);
+    lastPayload = JSON.stringify(allRequests);
+    listRevision += 1;
+    hideBanner();
+    render();
+  } catch (err) {
+    showBanner(`Could not delete request: ${err.message}`, 'error');
+  } finally {
+    deleteInFlight = false;
+    // A successful render() replaces the card, so the button may be gone.
+    if (button.isConnected) {
+      button.disabled = false;
+      button.textContent = buttonLabel;
+    }
+  }
+}
+
+/**
+ * Ask before deleting. Uses a native modal <dialog> when available and falls
+ * back to window.confirm in older browsers.
+ */
+function askDelete(target) {
+  if (deleteInFlight) return;
+
+  if (!supportsDeleteDialog()) {
+    if (window.confirm(`Delete "${target.title}"? This cannot be undone.`)) {
+      deleteRequest(target);
+    }
+    return;
+  }
+
+  pendingDelete = target;
+  deleteDialogItem.textContent = target.title;
+  deleteDialog.showModal();
+  // Cancel is the default action, so Enter is safe and Escape just closes.
+  deleteCancelButton.focus();
+}
+
+function closeDeleteDialog() {
+  pendingDelete = null;
+  if (supportsDeleteDialog() && deleteDialog.open) {
+    deleteDialog.close();
+  }
+}
+
 function startRefresh() {
   stopRefresh();
   refreshTimer = window.setInterval(() => {
-    if (isEditing()) return;
+    if (isEditing() || isDeleteDialogOpen()) return;
     loadRequests({ silent: true });
   }, REFRESH_MS);
 }
@@ -210,6 +301,7 @@ function showApp() {
 
 function showLogin({ message = '', kind = 'info' } = {}) {
   stopRefresh();
+  closeDeleteDialog();
   authRequired = true;
   allRequests = [];
   lastPayload = '';
@@ -636,7 +728,23 @@ function buildCard(request) {
     }
   });
 
-  side.appendChild(editButton);
+  const deleteButton = document.createElement('button');
+  deleteButton.type = 'button';
+  deleteButton.className = 'button button-small button-danger';
+  deleteButton.textContent = 'Delete';
+  deleteButton.setAttribute('aria-label', `Delete ${request.title}`);
+
+  deleteButton.addEventListener('click', () => {
+    if (deleteButton.disabled) return;
+    askDelete({ id: request.id, title: request.title, button: deleteButton });
+  });
+
+  const cardActions = document.createElement('div');
+  cardActions.className = 'card-actions';
+  cardActions.appendChild(editButton);
+  cardActions.appendChild(deleteButton);
+
+  side.appendChild(cardActions);
 
   card.appendChild(main);
   card.appendChild(side);
@@ -708,6 +816,7 @@ function render() {
 }
 
 async function loadRequests({ silent = false } = {}) {
+  const revision = listRevision;
   if (!silent && allRequests.length === 0) {
     loadingEl.hidden = false;
   }
@@ -728,6 +837,9 @@ async function loadRequests({ silent = false } = {}) {
     if (!Array.isArray(data.requests)) {
       throw new Error('Unexpected response from server.');
     }
+
+    // A delete finished while this request was in flight; its newer state wins.
+    if (revision !== listRevision) return;
 
     hideBanner();
     const payload = JSON.stringify(data.requests);
@@ -809,5 +921,18 @@ clearFiltersButton.addEventListener('click', () => {
 loginForm.addEventListener('submit', handleLogin);
 refreshButton.addEventListener('click', () => loadRequests());
 logoutButton.addEventListener('click', handleLogout);
+
+deleteCancelButton.addEventListener('click', closeDeleteDialog);
+
+deleteDialog.addEventListener('close', () => {
+  // Covers Escape and any other path that closes the dialog.
+  pendingDelete = null;
+});
+
+deleteConfirmButton.addEventListener('click', () => {
+  const target = pendingDelete;
+  closeDeleteDialog();
+  if (target) deleteRequest(target);
+});
 
 init();

@@ -563,6 +563,67 @@ textarea {
   font-size: 13px;
 }
 
+.button-danger {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: var(--card);
+}
+
+.button-danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.delete-dialog {
+  width: min(420px, calc(100vw - 32px));
+  margin: auto;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+
+/* Browsers without <dialog> support must not render the content inline. */
+.delete-dialog:not([open]) {
+  display: none;
+}
+
+.delete-dialog::backdrop {
+  background: rgba(10, 16, 24, 0.55);
+}
+
+.delete-dialog h2 {
+  margin: 0 0 10px;
+  font-size: 19px;
+}
+
+.delete-dialog p {
+  margin: 0 0 6px;
+}
+
+.delete-dialog-item {
+  margin: 0 0 8px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.delete-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+
 .request-edit {
   grid-column: 1 / -1;
   display: grid;

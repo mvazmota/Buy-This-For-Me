@@ -312,6 +312,76 @@ test('PATCH rejects invalid status and unknown id', async () => {
   });
 });
 
+test('DELETE /api/requests/:id removes the request and persists across a restart', async () => {
+  const { dir, dataFile } = makeTempDataFile();
+  let first;
+  try {
+    first = await startApp(dataFile);
+    const keep = (await (await postJson(first.base, { title: 'Keep', url: 'https://example.com/keep' })).json())
+      .request;
+    const gone = (await (await postJson(first.base, { title: 'Gone', url: 'https://example.com/gone' })).json())
+      .request;
+
+    const res = await fetch(`${first.base}/api/requests/${gone.id}`, { method: 'DELETE' });
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get('content-type'), /application\/json/);
+    assert.deepEqual(await res.json(), { deleted: true, id: gone.id });
+
+    const listed = await (await fetch(`${first.base}/api/requests`)).json();
+    assert.deepEqual(
+      listed.requests.map((request) => request.id),
+      [keep.id]
+    );
+
+    // Deleting the same id twice is a clean 404, not a 500.
+    const again = await fetch(`${first.base}/api/requests/${gone.id}`, { method: 'DELETE' });
+    assert.equal(again.status, 404);
+    assert.deepEqual(await again.json(), { error: 'Request not found.' });
+
+    await stopApp(first.app);
+    first = null;
+
+    const second = await startApp(dataFile);
+    try {
+      const reloaded = await (await fetch(`${second.base}/api/requests`)).json();
+      assert.deepEqual(
+        reloaded.requests.map((request) => request.id),
+        [keep.id]
+      );
+      assert.equal(reloaded.requests[0].title, 'Keep');
+    } finally {
+      await stopApp(second.app);
+    }
+  } finally {
+    if (first) await stopApp(first.app).catch(() => {});
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('DELETE rejects an unknown id with 404', async () => {
+  await withServer(async ({ base }) => {
+    const res = await fetch(`${base}/api/requests/does-not-exist`, { method: 'DELETE' });
+    assert.equal(res.status, 404);
+    assert.deepEqual(await res.json(), { error: 'Request not found.' });
+  });
+});
+
+test('the item route answers unsupported methods with a JSON 405', async () => {
+  await withServer(async ({ base }) => {
+    const created = await (await postJson(base, validPayload)).json();
+
+    const res = await fetch(`${base}/api/requests/${created.request.id}`);
+    assert.equal(res.status, 405);
+    assert.match(res.headers.get('content-type'), /application\/json/);
+    assert.deepEqual(await res.json(), {
+      error: 'Method not allowed. Use PATCH or DELETE.',
+    });
+
+    const listed = await (await fetch(`${base}/api/requests`)).json();
+    assert.equal(listed.requests.length, 1);
+  });
+});
+
 test('malformed JSON and oversized bodies are rejected', async () => {
   await withServer(async ({ base }) => {
     const malformed = await postJson(base, '{"title": ');
