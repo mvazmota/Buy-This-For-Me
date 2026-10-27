@@ -31,7 +31,7 @@ function fakeElement({ textContent = '', attributes = {} } = {}) {
  * Minimal document double: only querySelectorAll, so the extractor is tested
  * with plain data instead of a DOM implementation.
  */
-function makeDocument({ scripts = [], metas = [], itemProps = [] } = {}) {
+function makeDocument({ scripts = [], metas = [], itemProps = [], domPrices = {} } = {}) {
   const scriptElements = scripts.map((textContent) => fakeElement({ textContent }));
   const metaElements = metas.map(({ property, content }) =>
     fakeElement({ attributes: { property, content } })
@@ -53,6 +53,9 @@ function makeDocument({ scripts = [], metas = [], itemProps = [] } = {}) {
         );
       }
       if (selector === '[itemprop="price"]') return itemPropElements;
+      if (Object.prototype.hasOwnProperty.call(domPrices, selector)) {
+        return domPrices[selector].map((textContent) => fakeElement({ textContent }));
+      }
       return [];
     },
   };
@@ -183,6 +186,113 @@ test('JSON-LD wins over meta tags and itemprop', () => {
   assert.equal(extractPriceFromDocument(doc), 30);
 });
 
+test('reads offers from a non-Product JSON-LD node (Bertrand Book)', () => {
+  // https://www.bertrand.pt/... product page shape.
+  const doc = jsonLdDoc({
+    '@context': 'https://schema.org',
+    '@type': 'Book',
+    name: 'Murdoku - Volume 3',
+    isbn: '9789891234567',
+    offers: { '@type': 'Offer', priceCurrency: 'EUR', price: '17.09' },
+  });
+  assert.equal(extractPriceFromDocument(doc), 17.09);
+});
+
+test('reads offers from any node type nested in @graph', () => {
+  const doc = jsonLdDoc({
+    '@context': 'https://schema.org',
+    '@graph': [
+      { '@type': 'WebSite', name: 'Shop' },
+      {
+        '@type': ['Book', 'Product'],
+        offers: [{ '@type': 'Offer', priceCurrency: 'EUR', price: 21.5 }],
+      },
+    ],
+  });
+  assert.equal(extractPriceFromDocument(doc), 21.5);
+});
+
+test('falls back to a tolerant scan when a JSON-LD block has invalid JSON', () => {
+  // Ásua Farmácia: a PHP fragment used as a key makes JSON.parse fail.
+  const broken = `{
+  "@context": "https://schema.org",
+  "@type": "Product",
+  "<?php $__contextArgs = [];
+  echo json_encode($__contextArgs);
+?>": "https://schema.org/",
+  "name": "Microlife OXY210",
+  "offers": {
+    "@type": "Offer",
+    "priceCurrency": "EUR",
+    "price": 45.47,
+    "availability": "https://schema.org/InStock"
+  }
+}`;
+  assert.equal(extractPriceFromDocument(makeDocument({ scripts: [broken] })), 45.47);
+});
+
+test('tolerant JSON-LD scan accepts a string price and no currency', () => {
+  const noCurrency = '{ "offers": { "price": "45,47", } }';
+  assert.equal(extractPriceFromDocument(makeDocument({ scripts: [noCurrency] })), 45.47);
+
+  const quotedDecimal = '{ "offers": { "priceCurrency": "EUR", "price": "1.649,99", } }';
+  assert.equal(extractPriceFromDocument(makeDocument({ scripts: [quotedDecimal] })), 1649.99);
+});
+
+test('tolerant JSON-LD scan still rejects a broken block in another currency', () => {
+  const dollars = '{ "offers": { "priceCurrency": "USD", "price": 19.99, } }';
+  assert.equal(extractPriceFromDocument(makeDocument({ scripts: [dollars] })), null);
+});
+
+test('reads the Radio Popular .price.notranslate price', () => {
+  // <div class="price notranslate">19<sup>,99</sup></div> -> textContent "19,99".
+  const doc = makeDocument({ domPrices: { '.price.notranslate': ['19,99'] } });
+  assert.equal(extractPriceFromDocument(doc), 19.99);
+});
+
+test('reads the Amazon .a-offscreen price', () => {
+  const doc = makeDocument({
+    domPrices: { '.a-price .a-offscreen': ['12,99 €'] },
+  });
+  assert.equal(extractPriceFromDocument(doc), 12.99);
+});
+
+test('takes the first price from a purchase-box text blob', () => {
+  // Bertrand: current price followed by the old price in the same element.
+  const doc = makeDocument({
+    domPrices: { '.purchase-box-price': ['17,09€18,99€'] },
+  });
+  assert.equal(extractPriceFromDocument(doc), 17.09);
+});
+
+test('DOM selectors are ordered and skip elements without a usable price', () => {
+  const doc = makeDocument({
+    domPrices: {
+      '.a-price .a-offscreen': ['Indisponível'],
+      '.purchase-box-price': [],
+      '.price.notranslate': ['19,99'],
+      '.product-price': ['9,99'],
+    },
+  });
+  // .price.notranslate comes before the .product-price catch-all.
+  assert.equal(extractPriceFromDocument(doc), 19.99);
+});
+
+test('JSON-LD and meta tags win over visible price markup', () => {
+  const doc = makeDocument({
+    scripts: [JSON.stringify(product({ '@type': 'Offer', price: '30', priceCurrency: 'EUR' }))],
+    metas: [{ property: 'product:price:amount', content: '20' }],
+    domPrices: { '.product-price': ['9,99'] },
+  });
+  assert.equal(extractPriceFromDocument(doc), 30);
+
+  const metaOnly = makeDocument({
+    metas: [{ property: 'product:price:amount', content: '20' }],
+    domPrices: { '.product-price': ['9,99'] },
+  });
+  assert.equal(extractPriceFromDocument(metaOnly), 20);
+});
+
 test('parses European and US number formats and strips currency symbols', () => {
   assert.equal(parsePriceText('12.99'), 12.99);
   assert.equal(parsePriceText('12,99'), 12.99);
@@ -194,6 +304,15 @@ test('parses European and US number formats and strips currency symbols', () => 
   assert.equal(parsePriceText(12.5), 12.5);
   assert.equal(parsePriceText('12.994'), 12.99);
   assert.equal(parsePriceText('12.999'), 13);
+});
+
+test('parses only the first number in a text blob', () => {
+  assert.equal(parsePriceText('17,09€18,99€'), 17.09);
+  assert.equal(parsePriceText('€ 1.649,99'), 1649.99);
+  assert.equal(parsePriceText('19,99'), 19.99);
+  assert.equal(parsePriceText('12.99'), 12.99);
+  assert.equal(parsePriceText('1,234.56'), 1234.56);
+  assert.equal(parsePriceText('Preço 12,99 € (antes 15,00 €)'), 12.99);
 });
 
 test('rejects unusable prices without throwing', () => {

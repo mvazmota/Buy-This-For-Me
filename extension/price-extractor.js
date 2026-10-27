@@ -26,6 +26,20 @@
   ];
   const ITEMPROP_SELECTOR = '[itemprop="price"]';
 
+  // Last resort: visible price markup. Order matters because these classes are
+  // also used by search results and recommendation blocks, so broad selectors
+  // stay at the end. Each selector takes its first element with a valid price.
+  const DOM_PRICE_SELECTORS = [
+    '.a-price .a-offscreen',
+    '.purchase-box-price',
+    '.price.notranslate',
+    '.product-price',
+  ];
+
+  // First numeric run in a text blob. Handles "17,09", "1.649,99",
+  // "1 234,56" and "1,234.56" without merging neighbouring numbers.
+  const FIRST_NUMBER = /\d{1,3}(?:[.\s]\d{3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,3})*/;
+
   // Keep in sync with public/list-utils.js (the dashboard copy).
   const PRICE_FORMATTER = new Intl.NumberFormat('pt-PT', {
     style: 'currency',
@@ -50,20 +64,14 @@
   }
 
   /**
-   * Parse a price out of display text or a data attribute. Accepts "12.99",
-   * "12,99", "1.234,56" and "1,234.56" plus currency symbols and spaces.
-   * When both separators appear, the last one is the decimal separator;
-   * a single separator is decimal unless it repeats (then it groups thousands).
+   * Normalize one already-isolated numeric token. When both separators appear,
+   * the last one is the decimal separator; a single separator is decimal unless
+   * it repeats (then it groups thousands).
    */
-  function parsePriceText(raw) {
+  function parseDecimalToken(token) {
     try {
-      if (typeof raw === 'number') return roundPrice(raw);
-      if (typeof raw !== 'string') return null;
-
-      const digits = raw.replace(/[^0-9.,-]/g, '');
+      const digits = String(token).replace(/[^0-9.,]/g, '');
       if (!digits) return null;
-      // Negative values and ranges ("10-12") are not a usable product price.
-      if (digits.includes('-')) return null;
 
       const lastDot = digits.lastIndexOf('.');
       const lastComma = digits.lastIndexOf(',');
@@ -91,6 +99,28 @@
       if (!integerPart) integerPart = '0';
       if (!fractionPart) return roundPrice(Number(integerPart));
       return roundPrice(Number(`${integerPart}.${fractionPart}`));
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Parse a price out of display text or a data attribute. Accepts "12.99",
+   * "12,99", "1.234,56" and "1,234.56" plus currency symbols and spaces.
+   * Only the first number in the text is used, so a blob such as
+   * "17,09€18,99€" (current price plus old price) yields 17.09.
+   * Negative values and ranges ("10-12") are rejected.
+   */
+  function parsePriceText(raw) {
+    try {
+      if (typeof raw === 'number') return roundPrice(raw);
+      if (typeof raw !== 'string') return null;
+      // A minus sign next to a digit means a negative value or a price range.
+      if (/-|\u2212/.test(raw)) return null;
+
+      const match = FIRST_NUMBER.exec(raw);
+      if (!match) return null;
+      return parseDecimalToken(match[0]);
     } catch {
       return null;
     }
@@ -159,27 +189,26 @@
     return null;
   }
 
-  function isProductNode(node) {
-    return toArray(node['@type']).some(function (type) {
-      return typeof type === 'string' && type.trim().toLowerCase() === 'product';
-    });
+  /** Any node that carries offers, not just @type Product (Book, Course, ...). */
+  function hasOffers(node) {
+    return node.offers !== undefined && node.offers !== null;
   }
 
-  /** Depth-first walk: handles @graph, nested objects and arrays of products. */
-  function findProductPrice(node, depth, seen) {
+  /** Depth-first walk: handles @graph, nested objects and offer-bearing nodes. */
+  function findOfferPrice(node, depth, seen) {
     if (!node || typeof node !== 'object' || depth > 10) return null;
     if (seen.indexOf(node) !== -1) return null;
     seen.push(node);
 
     if (Array.isArray(node)) {
       for (const item of node) {
-        const nested = findProductPrice(item, depth + 1, seen);
+        const nested = findOfferPrice(item, depth + 1, seen);
         if (nested !== null) return nested;
       }
       return null;
     }
 
-    if (isProductNode(node)) {
+    if (hasOffers(node)) {
       const price = priceFromOffers(node.offers);
       if (price !== null) return price;
     }
@@ -188,12 +217,51 @@
       if (key === '@context' || key === '@type') continue;
       const child = node[key];
       if (child && typeof child === 'object') {
-        const nested = findProductPrice(child, depth + 1, seen);
+        const nested = findOfferPrice(child, depth + 1, seen);
         if (nested !== null) return nested;
       }
     }
 
     return null;
+  }
+
+  /**
+   * Fallback for JSON-LD blocks that do not parse (a PHP fragment or other junk
+   * inside the script). Scans the raw text for "priceCurrency"/"price" pairs and
+   * pairs each price with its nearest currency declaration.
+   */
+  function extractFromRawJsonLd(text) {
+    const currencies = [];
+    const currencyPattern = /"priceCurrency"\s*:\s*"(EUR|[A-Za-z]{3})"/g;
+    let currencyMatch;
+    while ((currencyMatch = currencyPattern.exec(text)) !== null) {
+      currencies.push({ index: currencyMatch.index, code: currencyMatch[1] });
+    }
+
+    const pricePattern = /"price"\s*:\s*"?([0-9][0-9.,]*)"?/g;
+    let priceMatch;
+    while ((priceMatch = pricePattern.exec(text)) !== null) {
+      // Drop a trailing separator such as the comma in `"price": 19.99,`.
+      const raw = priceMatch[1].replace(/[.,]+$/, '');
+      const price = parsePriceText(raw);
+      if (price === null) continue;
+      if (!nearestCurrencyIsEuro(currencies, priceMatch.index)) continue;
+      return price;
+    }
+    return null;
+  }
+
+  function nearestCurrencyIsEuro(currencies, index) {
+    let nearest = null;
+    let nearestDistance = Infinity;
+    for (const currency of currencies) {
+      const distance = Math.abs(currency.index - index);
+      if (distance < nearestDistance) {
+        nearest = currency;
+        nearestDistance = distance;
+      }
+    }
+    return nearest === null || isEuroCurrency(nearest.code);
   }
 
   function extractFromJsonLd(doc) {
@@ -204,9 +272,11 @@
       try {
         data = JSON.parse(text);
       } catch {
+        const fallback = extractFromRawJsonLd(text);
+        if (fallback !== null) return fallback;
         continue;
       }
-      const price = findProductPrice(data, 0, []);
+      const price = findOfferPrice(data, 0, []);
       if (price !== null) return price;
     }
     return null;
@@ -238,15 +308,32 @@
     return null;
   }
 
+  /** Visible marketing markup: first element with a usable price wins. */
+  function extractFromDom(doc) {
+    for (const selector of DOM_PRICE_SELECTORS) {
+      for (const element of selectAll(doc, selector)) {
+        const price = parsePriceText(textOf(element));
+        if (price !== null) return price;
+      }
+    }
+    return null;
+  }
+
   /**
    * Best-effort price lookup for a page document.
-   * Order: JSON-LD Product -> price meta tags -> itemprop="price".
-   * Returns a number rounded to 2 decimals, or null. Never throws.
+   * Order: JSON-LD (any offer-bearing node, plus a tolerant scan of blocks that
+   * do not parse) -> price meta tags -> itemprop="price" -> visible price
+   * selectors. Returns a number rounded to 2 decimals, or null. Never throws.
    */
   function extractPriceFromDocument(doc) {
     try {
       if (!doc) return null;
-      return extractFromJsonLd(doc) ?? extractFromMeta(doc) ?? extractFromItemProp(doc);
+      return (
+        extractFromJsonLd(doc) ??
+        extractFromMeta(doc) ??
+        extractFromItemProp(doc) ??
+        extractFromDom(doc)
+      );
     } catch {
       return null;
     }
