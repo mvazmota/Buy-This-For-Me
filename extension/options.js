@@ -7,6 +7,7 @@ const urlErrorEl = document.getElementById('backend-error');
 const passwordErrorEl = document.getElementById('password-error');
 const statusEl = document.getElementById('status');
 const saveButton = document.getElementById('save');
+const passwordToggle = document.getElementById('toggle-password');
 
 function showUrlError(message) {
   urlErrorEl.textContent = message;
@@ -93,6 +94,16 @@ urlInput.addEventListener('input', () => {
 passwordInput.addEventListener('input', () => {
   showPasswordError('');
   hideStatus();
+});
+
+// Show/hide toggle: presentation only. The stored value is untouched.
+passwordToggle.addEventListener('click', () => {
+  const reveal = passwordInput.type === 'password';
+  passwordInput.type = reveal ? 'text' : 'password';
+  passwordToggle.textContent = reveal ? 'Hide' : 'Show';
+  passwordToggle.setAttribute('aria-pressed', String(reveal));
+  passwordToggle.setAttribute('aria-label', reveal ? 'Hide app password' : 'Show app password');
+  passwordInput.focus();
 });
 
 load();

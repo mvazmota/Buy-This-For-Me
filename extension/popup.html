@@ -7,63 +7,103 @@
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
-    <header>
-      <h1>Add shopping request</h1>
+    <main class="card">
+      <header class="app-header">
+        <img class="app-icon" src="icons/icon-32.png" alt="" width="26" height="26" />
+        <h1>Add shopping request</h1>
+        <span id="backend-mode" class="mode-pill" hidden></span>
+      </header>
+
       <p id="page-hint" class="hint" hidden></p>
-      <p id="backend-hint" class="hint" hidden></p>
-    </header>
 
-    <form id="request-form" novalidate>
-      <label for="title">Title</label>
-      <input id="title" name="title" type="text" maxlength="200" autocomplete="off" required />
-      <p id="title-error" class="field-error" hidden></p>
-
-      <label for="quantity">Quantity</label>
-      <input id="quantity" name="quantity" type="number" min="1" max="999" step="1" value="1" required />
-      <p id="quantity-error" class="field-error" hidden></p>
-
-      <label for="price">Price <span class="optional">(optional)</span></label>
-      <input id="price" name="price" type="number" min="0" max="1000000" step="0.01" inputmode="decimal" />
-      <p id="price-display" class="price-display" hidden></p>
-      <p id="price-hint" class="hint" hidden></p>
-      <p id="price-error" class="field-error" hidden></p>
-
-      <label for="note">Note <span class="optional">(optional)</span></label>
-      <textarea id="note" name="note" rows="3" maxlength="1000" placeholder="Size, colour, brand, where to buy…"></textarea>
-      <p id="note-error" class="field-error" hidden></p>
-
-      <label for="url">Link</label>
-      <input id="url" name="url" type="url" maxlength="2048" autocomplete="off" required />
-      <p id="url-error" class="field-error" hidden></p>
-
-      <button id="submit" type="submit">Send request</button>
-
-      <p id="status" class="status" role="status" hidden></p>
-
-      <div id="duplicate-warning" class="duplicate-warning" role="alert" hidden>
-        <p id="duplicate-message" class="duplicate-message"></p>
-        <div class="duplicate-actions">
-          <button id="duplicate-add" type="button" class="button-inline">Add anyway</button>
-          <button id="duplicate-cancel" type="button" class="button-inline button-secondary">
-            Cancel
-          </button>
+      <form id="request-form" novalidate>
+        <div class="field">
+          <label for="title">Title</label>
+          <input id="title" name="title" type="text" maxlength="200" autocomplete="off" required />
+          <p id="title-error" class="field-error" hidden></p>
         </div>
-      </div>
-    </form>
 
-    <footer>
-      <span>Dashboard:</span>
-      <a
-        id="dashboard-link"
-        href="https://buy-this-for-me.m-vaz-mota.workers.dev/"
-        target="_blank"
-        rel="noopener noreferrer"
-      >
-        https://buy-this-for-me.m-vaz-mota.workers.dev
-      </a>
-      <span class="footer-sep">·</span>
-      <a id="options-link" href="#">Settings</a>
-    </footer>
+        <div class="field">
+          <label for="quantity">Quantity</label>
+          <input
+            id="quantity"
+            name="quantity"
+            type="number"
+            min="1"
+            max="999"
+            step="1"
+            value="1"
+            required
+          />
+          <p id="quantity-error" class="field-error" hidden></p>
+        </div>
+
+        <div class="field">
+          <label for="price">Price <span class="optional">optional</span></label>
+          <div class="input-affix">
+            <input
+              id="price"
+              name="price"
+              type="number"
+              min="0"
+              max="1000000"
+              step="0.01"
+              inputmode="decimal"
+            />
+            <span class="affix" aria-hidden="true">€</span>
+          </div>
+          <p id="price-display" class="price-display" hidden></p>
+          <p id="price-hint" class="hint" hidden></p>
+          <p id="price-error" class="field-error" hidden></p>
+        </div>
+
+        <div class="field">
+          <label for="note">Note <span class="optional">optional</span></label>
+          <textarea
+            id="note"
+            name="note"
+            rows="3"
+            maxlength="1000"
+            placeholder="Size, colour, brand, where to buy…"
+          ></textarea>
+          <p id="note-error" class="field-error" hidden></p>
+        </div>
+
+        <div class="field">
+          <label for="url">Link</label>
+          <input id="url" name="url" type="url" maxlength="2048" autocomplete="off" required />
+          <p id="url-error" class="field-error" hidden></p>
+        </div>
+
+        <button id="submit" class="primary" type="submit">Send request</button>
+
+        <p id="status" class="status" role="status" aria-live="polite" hidden></p>
+
+        <div id="duplicate-warning" class="duplicate-warning" role="alert" hidden>
+          <p id="duplicate-message" class="duplicate-message"></p>
+          <div class="duplicate-actions">
+            <button id="duplicate-add" type="button" class="button-inline">Add anyway</button>
+            <button id="duplicate-cancel" type="button" class="button-inline button-secondary">
+              Cancel
+            </button>
+          </div>
+        </div>
+      </form>
+
+      <footer class="app-footer">
+        <span class="footer-label">Dashboard:</span>
+        <a
+          id="dashboard-link"
+          href="https://buy-this-for-me.m-vaz-mota.workers.dev/"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          https://buy-this-for-me.m-vaz-mota.workers.dev
+        </a>
+        <span class="footer-sep" aria-hidden="true">·</span>
+        <a id="options-link" href="#">Settings</a>
+      </footer>
+    </main>
 
     <script src="settings.js"></script>
     <script src="url-utils.js"></script>

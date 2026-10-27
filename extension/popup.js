@@ -13,7 +13,7 @@ const urlInput = document.getElementById('url');
 const submitButton = document.getElementById('submit');
 const statusEl = document.getElementById('status');
 const pageHint = document.getElementById('page-hint');
-const backendHint = document.getElementById('backend-hint');
+const backendMode = document.getElementById('backend-mode');
 const dashboardLink = document.getElementById('dashboard-link');
 const optionsLink = document.getElementById('options-link');
 const duplicateWarning = document.getElementById('duplicate-warning');
@@ -246,14 +246,14 @@ async function applyBackend() {
   dashboardLink.href = `${backendUrl}/`;
   dashboardLink.textContent = backendUrl;
 
-  if (isLocalBackend(backendUrl)) {
-    backendHint.hidden = true;
-    backendHint.textContent = '';
-  } else {
-    backendHint.textContent =
-      'Online dashboard: requests are sent directly from this popup. Save the app password in Settings.';
-    backendHint.hidden = false;
-  }
+  // Short badge only: where the request is sent. No explanatory copy.
+  const local = isLocalBackend(backendUrl);
+  backendMode.textContent = local ? 'Local' : 'Online';
+  backendMode.dataset.mode = local ? 'local' : 'online';
+  backendMode.title = local
+    ? 'Requests go to the local server'
+    : 'Requests go to the online dashboard';
+  backendMode.hidden = false;
 }
 
 async function prefillFromActiveTab() {

@@ -625,3 +625,68 @@ test('dashboard HTML links the SVG favicon and the file exists', () => {
   assert.match(svg, /viewBox="0 0 64 64"/);
   assert.match(svg, /fill="#2563eb"/);
 });
+
+function readExtensionPage(page) {
+  const dir = path.join(ROOT, 'extension');
+  return {
+    html: fs.readFileSync(path.join(dir, `${page}.html`), 'utf8'),
+    js: fs.readFileSync(path.join(dir, `${page}.js`), 'utf8'),
+  };
+}
+
+function collectIds(html) {
+  const ids = new Set();
+  for (const match of html.matchAll(/\sid="([^"]+)"/g)) ids.add(match[1]);
+  return ids;
+}
+
+function collectGetElementById(js) {
+  const ids = new Set();
+  for (const match of js.matchAll(/getElementById\(\s*'([^']+)'\s*\)/g)) ids.add(match[1]);
+  return ids;
+}
+
+test('every element ID used by the popup and options scripts exists in its HTML', () => {
+  for (const page of ['popup', 'options']) {
+    const { html, js } = readExtensionPage(page);
+    const present = collectIds(html);
+    const referenced = collectGetElementById(js);
+
+    assert.ok(referenced.size > 0, `${page}.js references no element IDs`);
+    for (const id of referenced) {
+      assert.ok(present.has(id), `${page}.js references #${id}, missing from ${page}.html`);
+    }
+
+    // Duplicate ids would make getElementById ambiguous.
+    const allIds = [...html.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]);
+    assert.equal(new Set(allIds).size, allIds.length, `${page}.html has duplicate IDs`);
+  }
+});
+
+test('popup and options markup stays CSP-safe', () => {
+  for (const page of ['popup', 'options']) {
+    const { html } = readExtensionPage(page);
+
+    assert.ok(!/<style[\s>]/i.test(html), `${page}.html has a <style> block`);
+    assert.ok(!/\sstyle="/i.test(html), `${page}.html has an inline style attribute`);
+    assert.ok(!/\son[a-z]+="/i.test(html), `${page}.html has an inline event handler`);
+
+    for (const match of html.matchAll(/<script\b([^>]*)>/gi)) {
+      assert.match(match[1], /\ssrc="/i, `${page}.html has an inline <script>`);
+    }
+  }
+});
+
+test('the removed online-only backend hint stays gone', () => {
+  const { html, js } = readExtensionPage('popup');
+  const removed =
+    'Online dashboard: requests are sent directly from this popup. Save the app password in Settings.';
+
+  assert.ok(!js.includes(removed), 'popup.js still sets the removed hint text');
+  assert.ok(!html.includes('backend-hint'), 'popup.html still has the backend hint element');
+  assert.ok(!js.includes('backend-hint'), 'popup.js still looks up the backend hint element');
+
+  // The compact Online/Local badge replaces it.
+  assert.match(html, /id="backend-mode"/);
+  assert.match(js, /backendMode\.textContent = local \? 'Local' : 'Online'/);
+});

@@ -7,44 +7,69 @@
     <link rel="stylesheet" href="options.css" />
   </head>
   <body>
-    <main>
-      <h1>BIFM settings</h1>
+    <main class="card">
+      <header class="page-header">
+        <img class="app-icon" src="icons/icon-32.png" alt="" width="32" height="32" />
+        <div class="page-title">
+          <h1>BIFM settings</h1>
+          <p class="subtitle">Choose where shopping requests are sent.</p>
+        </div>
+      </header>
+
       <p class="intro">
-        Choose which dashboard receives shopping requests. The online Cloudflare Worker at
+        The online Cloudflare Worker at
         <code>https://buy-this-for-me.m-vaz-mota.workers.dev</code> is the default. Switch to the
         local server only when you are developing on this computer.
       </p>
 
       <form id="settings-form" novalidate>
-        <label for="backend-url">Dashboard URL</label>
-        <input
-          id="backend-url"
-          name="backend-url"
-          type="url"
-          spellcheck="false"
-          autocomplete="off"
-          placeholder="https://buy-this-for-me.m-vaz-mota.workers.dev"
-          required
-        />
-        <p id="backend-error" class="field-error" role="alert" hidden></p>
+        <div class="field">
+          <label for="backend-url">Dashboard URL</label>
+          <input
+            id="backend-url"
+            name="backend-url"
+            type="url"
+            spellcheck="false"
+            autocomplete="off"
+            placeholder="https://buy-this-for-me.m-vaz-mota.workers.dev"
+            aria-describedby="backend-error"
+            required
+          />
+          <p id="backend-error" class="field-error" role="alert" hidden></p>
+        </div>
 
-        <label for="app-password">App password</label>
-        <input
-          id="app-password"
-          name="app-password"
-          type="password"
-          spellcheck="false"
-          autocomplete="off"
-          placeholder="The online dashboard password"
-        />
-        <p class="field-note">
-          Stored in this browser only and used only to send requests to the online dashboard.
-          Leave empty when using the local server.
-        </p>
-        <p id="password-error" class="field-error" role="alert" hidden></p>
+        <div class="field">
+          <label for="app-password">App password</label>
+          <div class="password-row">
+            <input
+              id="app-password"
+              name="app-password"
+              type="password"
+              spellcheck="false"
+              autocomplete="off"
+              placeholder="The online dashboard password"
+              aria-describedby="password-note password-error"
+            />
+            <button
+              id="toggle-password"
+              class="password-toggle"
+              type="button"
+              aria-controls="app-password"
+              aria-pressed="false"
+              aria-label="Show app password"
+            >
+              Show
+            </button>
+          </div>
+          <p id="password-note" class="field-note">
+            Stored in this browser only and used only to send requests to the online dashboard.
+            Leave empty when using the local server.
+          </p>
+          <p id="password-error" class="field-error" role="alert" hidden></p>
+        </div>
 
-        <button id="save" type="submit">Save</button>
-        <p id="status" class="status" role="status" hidden></p>
+        <button id="save" class="primary" type="submit">Save</button>
+        <p id="status" class="status" role="status" aria-live="polite" hidden></p>
       </form>
 
       <section class="notes">
