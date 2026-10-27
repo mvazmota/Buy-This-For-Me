@@ -370,8 +370,14 @@ Worker sends them; the local server has no ntfy configuration and never notifies
    ```powershell
    npx wrangler secret put NTFY_TOPIC
    ```
-4. No redeploy is needed for a secret: `wrangler secret put` updates the running Worker.
-5. Add a request from the extension or the dashboard and check the phone.
+4. Optional: create a free account on <https://ntfy.sh>, then make an access token under
+   **Account → Access tokens** and save it as a Worker secret:
+   ```powershell
+   npx wrangler secret put NTFY_TOKEN
+   ```
+   Paste the token only at the prompt.
+5. No redeploy is needed for a secret: `wrangler secret put` updates the running Worker.
+6. Add a request from the extension or the dashboard and check the phone.
 
 Each notification is titled `New shopping request`, carries the `shopping_cart` tag, and opens
 the dashboard when tapped. Its text is the item title, then `Qty 2 · 12.99` when a quantity or
@@ -382,14 +388,17 @@ price is set, then the product link.
 - The send runs after the API response (`ctx.waitUntil`), so a slow or broken ntfy never delays
   or fails the request. Missing `NTFY_TOPIC` silently disables notifications; an ntfy error is
   logged briefly without the topic and changes nothing.
+- `NTFY_TOKEN` is optional. When set, it is sent only as an `Authorization: Bearer` header;
+  it never appears in the URL, body or logs. A logged-in ntfy account gets higher limits than
+  anonymous use.
 - `NTFY_SERVER` is optional. It defaults to `https://ntfy.sh`; set it as a plain Worker
   variable only for a self-hosted instance, and it must be `https://` or notifications are
   skipped.
 - The body is capped at 300 characters: a note is only included when it still fits, and the
   product link is dropped before the title is shortened.
 
-**The topic is effectively a password.** Anyone who knows it can read your notifications. Use a
-long random name, never paste it in chat, and never commit it.
+**The topic and token are effectively passwords.** Anyone who knows the topic can read your
+notifications. Use a long random name, never paste either value in chat, and never commit them.
 
 ### 7.7 Connect Cloudflare Workers Builds to GitHub
 

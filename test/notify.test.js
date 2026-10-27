@@ -172,3 +172,64 @@ test('reports a rejected response and a network error without leaking the topic'
   assert.equal(thrown.messages.length, 1);
   assert.ok(!thrown.messages[0].includes(TOPIC));
 });
+
+test('sends NTFY_TOKEN only as a Bearer header, never in the URL or body', async () => {
+  const { buildNtfyMessage, sendNtfyNotification } = await loadNotify();
+  const message = buildNtfyMessage(sampleRequest(), ORIGIN);
+  const token = 'tk_test_8f3a2b1c';
+
+  const fetchImpl = fakeFetch();
+  const result = await sendNtfyNotification(
+    { NTFY_TOPIC: TOPIC, NTFY_TOKEN: token },
+    message,
+    fetchImpl
+  );
+
+  assert.deepEqual(result, { sent: true });
+  assert.equal(fetchImpl.calls.length, 1);
+  const [call] = fetchImpl.calls;
+  assert.equal(call.options.headers.Authorization, `Bearer ${token}`);
+  assert.ok(!call.url.includes(token));
+  assert.ok(!call.options.body.includes(token));
+});
+
+test('omits the Authorization header when NTFY_TOKEN is unset or empty', async () => {
+  const { buildNtfyMessage, sendNtfyNotification } = await loadNotify();
+  const message = buildNtfyMessage(sampleRequest(), ORIGIN);
+
+  for (const env of [
+    { NTFY_TOPIC: TOPIC },
+    { NTFY_TOPIC: TOPIC, NTFY_TOKEN: '' },
+    { NTFY_TOPIC: TOPIC, NTFY_TOKEN: '   ' },
+  ]) {
+    const fetchImpl = fakeFetch();
+    const result = await sendNtfyNotification(env, message, fetchImpl);
+    assert.deepEqual(result, { sent: true });
+    assert.equal(fetchImpl.calls.length, 1);
+    const headers = fetchImpl.calls[0].options.headers;
+    assert.ok(
+      !Object.keys(headers).some((name) => name.toLowerCase() === 'authorization'),
+      `${JSON.stringify(env)} should not send Authorization`
+    );
+  }
+});
+
+test('logs a 429 rate limit without the topic or token', async () => {
+  const { buildNtfyMessage, sendNtfyNotification } = await loadNotify();
+  const message = buildNtfyMessage(sampleRequest(), ORIGIN);
+  const token = 'tk_test_rate_limit_5d7e';
+
+  const logged = await quietly(() =>
+    sendNtfyNotification(
+      { NTFY_TOPIC: TOPIC, NTFY_TOKEN: token },
+      message,
+      fakeFetch({ ok: false, status: 429 })
+    )
+  );
+
+  assert.equal(logged.value.sent, false);
+  assert.equal(logged.messages.length, 1);
+  assert.match(logged.messages[0], /status 429/);
+  assert.ok(!logged.messages[0].includes(TOPIC));
+  assert.ok(!logged.messages[0].includes(token));
+});

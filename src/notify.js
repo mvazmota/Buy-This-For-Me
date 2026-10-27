@@ -101,7 +101,7 @@ export function ntfyServer(env) {
 
 /**
  * Publish a message to ntfy. Never throws: every failure is logged without the
- * topic and reported as { sent: false }.
+ * topic or token and reported as { sent: false }.
  */
 export async function sendNtfyNotification(env, message, fetchImpl = fetch) {
   const topic =
@@ -114,17 +114,24 @@ export async function sendNtfyNotification(env, message, fetchImpl = fetch) {
     return { sent: false, reason: 'insecure-server' };
   }
 
+  // NTFY_TOKEN is optional; when set it is sent only as a Bearer header.
+  const token =
+    env && typeof env.NTFY_TOKEN === 'string' ? env.NTFY_TOKEN.trim() : '';
+
   const target = `${server}/${encodeURIComponent(topic)}`;
   try {
+    const headers = {
+      'Content-Type': 'text/plain; charset=utf-8',
+      Title: message.title,
+      Tags: message.tags,
+      Priority: message.priority,
+      Click: message.click,
+    };
+    if (token) headers.Authorization = `Bearer ${token}`;
+
     const response = await fetchImpl(target, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'text/plain; charset=utf-8',
-        Title: message.title,
-        Tags: message.tags,
-        Priority: message.priority,
-        Click: message.click,
-      },
+      headers,
       body: message.body,
     });
 

@@ -55,7 +55,9 @@ npx wrangler deploy
   settings. Never commit, print, expose, or ask the user to paste the secret value. Do not place
   it in `wrangler.jsonc`, `.dev.vars`, build commands, source, or tests.
 - `NTFY_TOPIC` is a Worker secret and the ntfy topic acts as a password: never commit, log, or
-  return it. Notification failures are logged without the topic; see README section 7.6.
+  return it. `NTFY_TOKEN` is also a Worker secret: it is only sent as a Bearer header and is
+  never committed, logged, or returned. Notification failures are logged without either value;
+  see README section 7.6.
 - The extension stores the app password locally in `chrome.storage.local` (key `appPassword`).
   This is a deliberate, family-only accepted risk. The value must never be committed or
   hardcoded, and it is used only for `GET` and `POST /api/requests` from the extension via the
