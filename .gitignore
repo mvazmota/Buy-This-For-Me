@@ -4,3 +4,5 @@ data/
 .wrangler/
 .wrangler-dry-run/
 .dev.vars
+selfhost/.env
+selfhost/data/

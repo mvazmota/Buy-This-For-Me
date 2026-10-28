@@ -400,6 +400,13 @@ price is set, then the product link.
 **The topic and token are effectively passwords.** Anyone who knows the topic can read your
 notifications. Use a long random name, never paste either value in chat, and never commit them.
 
+**Self-hosted option.** If you would rather not depend on `ntfy.sh`, you can run ntfy on your
+own hardware behind a Cloudflare Tunnel. `selfhost/docker-compose.yml` starts ntfy and
+cloudflared on a Raspberry Pi with no published ports, and
+[selfhost/README.md](selfhost/README.md) is the full Pi 5 runbook. Point the Worker at it by
+setting `NTFY_SERVER` to your `https://` URL (`npx wrangler secret put NTFY_SERVER`, or a plain
+variable); `NTFY_TOPIC` and `NTFY_TOKEN` keep working unchanged.
+
 ### 7.7 Connect Cloudflare Workers Builds to GitHub
 
 The repository for this project is `mvazmota/Buy-This-For-Me`, production branch `main`.
