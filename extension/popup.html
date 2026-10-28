@@ -16,7 +16,42 @@
 
       <p id="page-hint" class="hint" hidden></p>
 
-      <form id="request-form" novalidate>
+      <p id="account-line" class="account-line" hidden>
+        Signed in as <strong id="account-name"></strong>
+        <button id="logout" type="button" class="link-button">Log out</button>
+      </p>
+
+      <section id="login-view" class="login-view" hidden>
+        <p class="login-intro">Log in to add items to the shopping list.</p>
+        <form id="login-form" novalidate>
+          <div class="field">
+            <label for="login-username">Username</label>
+            <input
+              id="login-username"
+              name="login-username"
+              type="text"
+              autocomplete="username"
+              autocapitalize="none"
+              spellcheck="false"
+              required
+            />
+          </div>
+          <div class="field">
+            <label for="login-password">Password</label>
+            <input
+              id="login-password"
+              name="login-password"
+              type="password"
+              autocomplete="current-password"
+              required
+            />
+          </div>
+          <p id="login-error" class="field-error" role="alert" hidden></p>
+          <button id="login-submit" type="submit" class="primary">Log in</button>
+        </form>
+      </section>
+
+      <form id="request-form" novalidate hidden>
         <div class="field">
           <label for="title">Title</label>
           <input id="title" name="title" type="text" maxlength="200" autocomplete="off" required />

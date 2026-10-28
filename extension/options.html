@@ -39,48 +39,12 @@
         </div>
 
         <div class="field">
-          <label for="app-username">Username</label>
-          <input
-            id="app-username"
-            name="app-username"
-            type="text"
-            spellcheck="false"
-            autocapitalize="none"
-            autocomplete="username"
-            placeholder="Your account name"
-            aria-describedby="username-error"
-          />
-          <p id="username-error" class="field-error" role="alert" hidden></p>
-        </div>
-
-        <div class="field">
-          <label for="app-password">Password</label>
-          <div class="password-row">
-            <input
-              id="app-password"
-              name="app-password"
-              type="password"
-              spellcheck="false"
-              autocomplete="off"
-              placeholder="Your account password"
-              aria-describedby="password-note password-error"
-            />
-            <button
-              id="toggle-password"
-              class="password-toggle"
-              type="button"
-              aria-controls="app-password"
-              aria-pressed="false"
-              aria-label="Show app password"
-            >
-              Show
-            </button>
-          </div>
-          <p id="password-note" class="field-note">
-            Your account details are stored in this browser only and used only to send requests to
-            the online dashboard. Leave both empty when using the local server.
+          <p class="field-note" id="account-state">Checking your account…</p>
+          <button id="logout" class="password-toggle" type="button">Log out</button>
+          <p class="field-note">
+            You log in from the extension popup. Credentials are stored in this browser profile
+            only, and only to send requests to the online dashboard.
           </p>
-          <p id="password-error" class="field-error" role="alert" hidden></p>
         </div>
 
         <button id="save" class="primary" type="submit">Save</button>
@@ -96,8 +60,8 @@
         </p>
         <p>
           When the configured URL is remote, the extension sends each request straight to the
-          Worker, with no new tab. Save the app password here first; sending asks you to update it
-          in Settings if it is missing or wrong. The password stays in this browser profile.
+          Worker, with no new tab. Log in from the extension popup; the popup remembers the account
+          in this browser profile and asks again if the login stops working.
         </p>
 
         <h2>Local server (optional)</h2>

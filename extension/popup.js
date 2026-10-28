@@ -19,6 +19,16 @@ const duplicateMessage = document.getElementById('duplicate-message');
 const duplicateAddButton = document.getElementById('duplicate-add');
 const duplicateCancelButton = document.getElementById('duplicate-cancel');
 
+const loginView = document.getElementById('login-view');
+const loginForm = document.getElementById('login-form');
+const loginUsername = document.getElementById('login-username');
+const loginPassword = document.getElementById('login-password');
+const loginError = document.getElementById('login-error');
+const loginSubmit = document.getElementById('login-submit');
+const accountLine = document.getElementById('account-line');
+const accountName = document.getElementById('account-name');
+const logoutButton = document.getElementById('logout');
+
 const fieldErrors = {
   title: document.getElementById('title-error'),
   quantity: document.getElementById('quantity-error'),
@@ -303,7 +313,7 @@ async function sendToRemote(payload) {
   const username = await getAppUsername();
   const password = await getAppPassword();
   if (!username || !password) {
-    showStatus('No account saved. Add your username and password in Settings, then try again.', 'error');
+    showLoginView({ message: 'Log in to add items.' });
     return false;
   }
 
@@ -321,7 +331,8 @@ async function sendToRemote(payload) {
     const data = await response.json().catch(() => ({}));
 
     if (response.status === 401) {
-      showStatus('Username or password is wrong. Update it in Settings.', 'error');
+      await clearAppCredentials();
+      showLoginView({ message: 'Your saved login no longer works. Log in again.' });
       return false;
     }
 
@@ -455,17 +466,156 @@ async function confirmDuplicate() {
   }
 }
 
-const backendReady = applyBackend();
+/**
+ * Show one of the two popup views. The add form is only reachable while the
+ * popup holds credentials the server accepted.
+ */
+function showLoginView({ message = '', kind = 'error' } = {}) {
+  loginView.hidden = false;
+  form.hidden = true;
+  accountLine.hidden = true;
+  pageHint.hidden = true;
+  hideDuplicateWarning();
+  clearStatus();
+
+  if (message) {
+    loginError.textContent = message;
+    loginError.dataset.kind = kind;
+    loginError.hidden = false;
+  } else {
+    loginError.hidden = true;
+    loginError.textContent = '';
+  }
+}
+
+function showAddView(username) {
+  loginView.hidden = true;
+  form.hidden = false;
+  loginError.hidden = true;
+
+  if (isLocalBackend(backendUrl)) {
+    accountLine.hidden = true;
+  } else {
+    accountLine.hidden = false;
+    accountName.textContent = username || 'your account';
+  }
+}
+
+function setLoginError(message) {
+  loginError.textContent = message;
+  loginError.hidden = !message;
+}
+
+/** Ask the server whether these credentials are valid. */
+async function credentialsAreValid(username, password) {
+  const response = await fetch(`${backendUrl}/api/requests`, {
+    headers: { 'X-App-Username': username, 'X-App-Password': password },
+    cache: 'no-store',
+  });
+  return response.status;
+}
+
+async function handleLogin(event) {
+  event.preventDefault();
+  setLoginError('');
+
+  const username = loginUsername.value.trim().toLowerCase();
+  const password = loginPassword.value;
+
+  if (!username || !password) {
+    setLoginError('Enter your username and password.');
+    (username ? loginPassword : loginUsername).focus();
+    return;
+  }
+
+  loginSubmit.disabled = true;
+  loginSubmit.textContent = 'Logging in…';
+
+  try {
+    await backendReady;
+    const status = await credentialsAreValid(username, password);
+
+    if (status === 401) {
+      setLoginError('Wrong username or password.');
+      loginPassword.select();
+      return;
+    }
+    if (status === 403) {
+      setLoginError('This browser is not allowed to reach the server.');
+      return;
+    }
+    if (status !== 200) {
+      setLoginError(`The server returned ${status}. Try again.`);
+      return;
+    }
+
+    await setAppUsername(username);
+    await setAppPassword(password, backendUrl);
+    loginPassword.value = '';
+    showAddView(username);
+    await prefillFromActiveTab();
+  } catch (err) {
+    setLoginError(
+      isNetworkError(err)
+        ? `Cannot reach ${backendUrl}. Check your connection.`
+        : `Login failed: ${err.message}`
+    );
+  } finally {
+    loginSubmit.disabled = false;
+    loginSubmit.textContent = 'Log in';
+  }
+}
+
+async function handleLogout() {
+  await clearAppCredentials();
+  loginPassword.value = '';
+  showLoginView({ message: 'Logged out.', kind: 'info' });
+}
+
+/**
+ * Decide which view to show: the add form when stored credentials still work,
+ * otherwise the login form.
+ */
+async function gateOnLogin() {
+  if (isLocalBackend(backendUrl)) {
+    showAddView(null);
+    return;
+  }
+
+  const username = await getAppUsername();
+  const password = await getAppPassword();
+  if (!username || !password) {
+    showLoginView();
+    return;
+  }
+
+  try {
+    const status = await credentialsAreValid(username, password);
+    if (status === 401 || status === 403) {
+      await clearAppCredentials();
+      showLoginView({ message: 'Your saved login no longer works. Log in again.' });
+      return;
+    }
+    showAddView(username);
+  } catch {
+    // Offline: keep the add form so the submit can report the network error.
+    showAddView(username);
+  }
+}
+
+const backendReady = applyBackend().then(async () => {
+  await gateOnLogin();
+  if (form.hidden) return;
+  const tab = await prefillFromActiveTab();
+  await autoFillPriceFromPage(tab);
+});
 
 form.addEventListener('submit', submitRequest);
+loginForm.addEventListener('submit', handleLogin);
+logoutButton.addEventListener('click', handleLogout);
 duplicateAddButton.addEventListener('click', confirmDuplicate);
 duplicateCancelButton.addEventListener('click', cancelDuplicate);
 optionsLink.addEventListener('click', (event) => {
   event.preventDefault();
   chrome.runtime.openOptionsPage();
-});
-
-backendReady.then(async () => {
-  const tab = await prefillFromActiveTab();
-  await autoFillPriceFromPage(tab);
 });

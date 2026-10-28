@@ -104,6 +104,14 @@ async function setAppUsername(value) {
   return normalized;
 }
 
+/** Forget the saved account. Used by Log out and by a rejected login. */
+async function clearAppCredentials() {
+  await chrome.storage.local.set({
+    [APP_USERNAME_STORAGE_KEY]: '',
+    [APP_PASSWORD_STORAGE_KEY]: '',
+  });
+}
+
 /**
  * Read the saved app password, if any. It is stored in this browser profile
  * only (family-only tool, accepted risk) and is sent only to POST

@@ -123,7 +123,7 @@ function loadPopup({
     const source = fs.readFileSync(path.join(__dirname, '..', 'extension', file), 'utf8');
     const suffix =
       file === 'popup.js'
-        ? '\n;globalThis.__popupTest = { sendToRemote, sendToLocal, backendReady, getBackendUrl, getAppPassword, setAppPassword, submitRequest, confirmDuplicate, cancelDuplicate, checkDuplicate, validate, prefillFromActiveTab, autoFillPriceFromPage, getPendingPayload: () => pendingPayload };'
+        ? '\n;globalThis.__popupTest = { sendToRemote, sendToLocal, backendReady, getBackendUrl, getAppPassword, setAppPassword, submitRequest, confirmDuplicate, cancelDuplicate, checkDuplicate, validate, prefillFromActiveTab, autoFillPriceFromPage, handleLogin, handleLogout, gateOnLogin, getPendingPayload: () => pendingPayload };'
         : '';
     vm.runInContext(source + suffix, context, { filename: file });
   }
@@ -134,6 +134,111 @@ function loadPopup({
 function flushAsync() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
+
+test('the popup shows the login form when no account is saved', async () => {
+  const fetchImpl = async () => {
+    throw new Error('the popup must not call the server without an account');
+  };
+
+  const { backendReady, elements } = loadPopup({
+    appUsername: null,
+    appPassword: null,
+    fetchImpl,
+  });
+  await backendReady;
+
+  assert.equal(elements.get('login-view').hidden, false);
+  assert.equal(elements.get('request-form').hidden, true);
+});
+
+test('the popup shows the add form when the saved login still works', async () => {
+  const calls = [];
+  const fetchImpl = async (url, options = {}) => {
+    calls.push({ url, options });
+    return { ok: true, status: 200, async json() { return { requests: [] }; } };
+  };
+
+  const { backendReady, elements } = loadPopup({ fetchImpl });
+  await backendReady;
+
+  assert.equal(elements.get('login-view').hidden, true);
+  assert.equal(elements.get('request-form').hidden, false);
+  assert.equal(calls[0].options.headers['X-App-Username'], 'alex');
+});
+
+test('a saved login the server rejects drops back to the login form', async () => {
+  const fetchImpl = async () => ({
+    ok: false,
+    status: 401,
+    async json() {
+      return { error: 'Authentication required.' };
+    },
+  });
+
+  const { backendReady, elements, stored } = loadPopup({ fetchImpl });
+  await backendReady;
+
+  assert.equal(elements.get('login-view').hidden, false);
+  assert.equal(elements.get('request-form').hidden, true);
+  assert.match(elements.get('login-error').textContent, /no longer works/i);
+  assert.equal(stored.appPassword, '');
+  assert.equal(stored.appUsername, '');
+});
+
+test('logging in stores the account and reveals the add form', async () => {
+  const calls = [];
+  const fetchImpl = async (url, options = {}) => {
+    calls.push({ url, options });
+    return { ok: true, status: 200, async json() { return { requests: [] }; } };
+  };
+
+  const { backendReady, elements, stored, handleLogin } = loadPopup({
+    appUsername: null,
+    appPassword: null,
+    fetchImpl,
+  });
+  await backendReady;
+  assert.equal(elements.get('login-view').hidden, false);
+
+  elements.get('login-username').value = 'Martin';
+  elements.get('login-password').value = 'hunter2';
+
+  await handleLogin({ preventDefault() {} });
+
+  assert.equal(stored.appUsername, 'martin');
+  assert.equal(stored.appPassword, 'hunter2');
+  assert.equal(elements.get('login-view').hidden, true);
+  assert.equal(elements.get('request-form').hidden, false);
+  assert.equal(elements.get('account-name').textContent, 'martin');
+  assert.equal(calls[0].options.headers['X-App-Username'], 'martin');
+});
+
+test('a wrong password keeps the login form and stores nothing', async () => {
+  const fetchImpl = async () => ({
+    ok: false,
+    status: 401,
+    async json() {
+      return { error: 'Invalid username or password.' };
+    },
+  });
+
+  const { backendReady, elements, stored, handleLogin } = loadPopup({
+    appUsername: null,
+    appPassword: null,
+    fetchImpl,
+  });
+  await backendReady;
+
+  elements.get('login-username').value = 'martin';
+  elements.get('login-password').value = 'nope';
+
+  await handleLogin({ preventDefault() {} });
+
+  assert.equal(elements.get('login-view').hidden, false);
+  assert.equal(elements.get('request-form').hidden, true);
+  assert.match(elements.get('login-error').textContent, /wrong username or password/i);
+  assert.equal(stored.appPassword, undefined);
+});
 
 function fillForm(elements, values = {}) {
   const fields = {
@@ -174,6 +279,7 @@ test('remote submissions post directly to the Worker with the saved app password
 
   const { sendToRemote, backendReady, elements, createdTabs } = loadPopup({ fetchImpl });
   await backendReady;
+  calls.length = 0;
 
   const payload = {
     title: 'Running shoes',
@@ -200,7 +306,7 @@ test('remote submissions post directly to the Worker with the saved app password
   assert.equal(status.children[1].href, `${REMOTE_URL}/`);
 });
 
-test('a rejected remote password points at the extension settings', async () => {
+test('a rejected remote login sends the popup back to the login form', async () => {
   const fetchImpl = async () => ({
     ok: false,
     status: 401,
@@ -209,7 +315,7 @@ test('a rejected remote password points at the extension settings', async () => 
     },
   });
 
-  const { sendToRemote, backendReady, elements, createdTabs } = loadPopup({ fetchImpl });
+  const { sendToRemote, backendReady, elements, createdTabs, stored } = loadPopup({ fetchImpl });
   await backendReady;
 
   const payload = {
@@ -220,10 +326,13 @@ test('a rejected remote password points at the extension settings', async () => 
   };
   assert.equal(await sendToRemote(payload), false);
   assert.equal(createdTabs.length, 0);
-  assert.equal(
-    elements.get('status').textContent,
-    'Username or password is wrong. Update it in Settings.'
-  );
+
+  // The add form is replaced by the login form and the stored login is dropped.
+  assert.equal(elements.get('request-form').hidden, true);
+  assert.equal(elements.get('login-view').hidden, false);
+  assert.match(elements.get('login-error').textContent, /log in/i);
+  assert.equal(stored.appPassword, '');
+  assert.equal(stored.appUsername, '');
 });
 
 test('an unreachable remote server reports a network error', async () => {
@@ -359,6 +468,7 @@ test('popup warns about a duplicate and sends nothing until confirmed', async ()
   const context = loadPopup({ fetchImpl });
   await context.backendReady;
   await flushAsync();
+  calls.length = 0;
   fillForm(context.elements);
 
   assert.equal(await context.submitRequest({ preventDefault() {} }), undefined);
@@ -401,6 +511,7 @@ test('popup posts normally when no duplicate exists', async () => {
   const context = loadPopup({ fetchImpl });
   await context.backendReady;
   await flushAsync();
+  calls.length = 0;
   fillForm(context.elements);
 
   await context.submitRequest({ preventDefault() {} });
@@ -426,6 +537,7 @@ test('a failed duplicate check warns but still allows sending', async () => {
   const context = loadPopup({ fetchImpl });
   await context.backendReady;
   await flushAsync();
+  calls.length = 0;
   fillForm(context.elements);
 
   await context.submitRequest({ preventDefault() {} });
@@ -454,6 +566,7 @@ test('cancel drops the pending duplicate without sending', async () => {
   const context = loadPopup({ fetchImpl });
   await context.backendReady;
   await flushAsync();
+  calls.length = 0;
   fillForm(context.elements, { title: 'Milk', url: 'https://shop.example/milk' });
 
   await context.submitRequest({ preventDefault() {} });
@@ -483,6 +596,7 @@ test('popup sends price only when provided and validates its format', async () =
   await context.backendReady;
   await flushAsync();
 
+  calls.length = 0;
   fillForm(context.elements);
   await context.submitRequest({ preventDefault() {} });
   const withoutPrice = JSON.parse(calls[1].options.body);
