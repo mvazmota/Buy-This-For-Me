@@ -15,22 +15,24 @@ This file is the living backlog. Move items between sections as work lands.
   - Runbook: [`selfhost/README.md`](selfhost/README.md)
   - Not tested on real hardware.
 
-## Next — notification channel
+## Notifications
 
 `ntfy.sh` is rate-limited per source IP, and Cloudflare Workers share egress IPs, so `429`
-failures are expected. The project needs a notification channel that is not tied to a shared IP.
+failures are expected there. Discord is the active channel; ntfy is disabled until self-hosting
+is possible.
 
 - [x] **Discord webhook** — free, per-webhook rate limits (about 5 requests per 2 seconds), no
-      shared-IP issue. Needs `DISCORD_WEBHOOK_URL` as a Worker secret. Implemented, awaiting the
-      secret and a live test.
+      shared-IP issue. Live and verified with `DISCORD_WEBHOOK_URL` as a Worker secret.
+- [x] **Make the notifier pluggable** — one `src/notify.js` interface that dispatches to whichever
+      channels are configured, so several can be enabled at once. Implemented for ntfy + Discord.
 - [ ] **Telegram bot** — free, per-bot limits, no shared-IP issue. Needs `TELEGRAM_BOT_TOKEN` and
       `TELEGRAM_CHAT_ID`. User previously said they were not interested in Telegram; keep it
       listed but deprioritised.
 - [ ] **Pushover** — one-time ~$5 per platform, limits per app token. Needs `PUSHOVER_TOKEN` and
       `PUSHOVER_USER`.
 - [ ] **Self-hosted ntfy** — see Blocked above. Free forever, needs the Pi online.
-- [x] **Make the notifier pluggable** — one `src/notify.js` interface that dispatches to whichever
-      channels are configured, so several can be enabled at once. Implemented for ntfy + Discord.
+- [ ] Discord direct messages instead of a channel — needs a bot (`DISCORD_BOT_TOKEN` plus a DM
+      channel), because webhooks can only post into channels. Parked: the private server works.
 
 ## Backlog
 
@@ -51,5 +53,7 @@ failures are expected. The project needs a notification channel that is not tied
 - [x] Cart icons and dashboard favicon.
 - [x] Dashboard search, status filters, sorting, inline edit, delete with confirmation, euro
       prices, dark mode, truncated titles.
-- [x] ntfy sender with optional access token.
-- [x] 126 automated tests.
+- [x] Discord notifications for new requests (live).
+- [x] ntfy sender with optional access token. Disabled: ntfy.sh rate-limits Cloudflare's shared
+      egress IPs.
+- [x] 138 automated tests.
