@@ -414,7 +414,7 @@ test('local session endpoints keep the dashboard password-free', async () => {
   await withServer(async ({ base }) => {
     const session = await fetch(`${base}/api/session`);
     assert.equal(session.status, 200);
-    assert.deepEqual(await session.json(), { authenticated: true, authRequired: false });
+    assert.deepEqual(await session.json(), { authenticated: true, authRequired: false, username: 'local', role: 'admin' });
 
     const login = await fetch(`${base}/api/login`, {
       method: 'POST',
@@ -422,11 +422,11 @@ test('local session endpoints keep the dashboard password-free', async () => {
       body: JSON.stringify({ password: 'anything' }),
     });
     assert.equal(login.status, 200);
-    assert.deepEqual(await login.json(), { authenticated: true, authRequired: false });
+    assert.deepEqual(await login.json(), { authenticated: true, authRequired: false, username: 'local', role: 'admin' });
 
     const logout = await fetch(`${base}/api/logout`, { method: 'POST' });
     assert.equal(logout.status, 200);
-    assert.deepEqual(await logout.json(), { authenticated: true, authRequired: false });
+    assert.deepEqual(await logout.json(), { authenticated: true, authRequired: false, username: 'local', role: 'admin' });
   });
 });
 

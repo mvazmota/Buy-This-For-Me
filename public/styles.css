@@ -553,6 +553,37 @@ textarea {
   opacity: 0.7;
 }
 
+/* Read-only status pill shown to members, who cannot edit. */
+.status-badge {
+  display: inline-block;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.status-badge[data-status="New"] {
+  border-color: var(--status-new);
+  background: var(--accent-soft);
+}
+
+.status-badge[data-status="Purchased"] {
+  border-color: var(--status-purchased);
+  background: var(--warn-soft);
+}
+
+.status-badge[data-status="Done"] {
+  border-color: var(--status-done);
+  background: var(--ok-soft);
+}
+
+.status-badge[data-status="Not buying"] {
+  border-color: var(--status-not-buying);
+  background: var(--neutral-soft);
+}
+
 .status-error {
   margin: 0;
   max-width: 220px;

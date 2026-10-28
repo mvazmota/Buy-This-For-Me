@@ -2,27 +2,40 @@
 
 const form = document.getElementById('settings-form');
 const urlInput = document.getElementById('backend-url');
+const usernameInput = document.getElementById('app-username');
 const passwordInput = document.getElementById('app-password');
 const urlErrorEl = document.getElementById('backend-error');
+const usernameErrorEl = document.getElementById('username-error');
 const passwordErrorEl = document.getElementById('password-error');
 const statusEl = document.getElementById('status');
 const saveButton = document.getElementById('save');
 const passwordToggle = document.getElementById('toggle-password');
 
+function toggleInvalid(input, message) {
+  input.setAttribute('aria-invalid', message ? 'true' : 'false');
+}
+
 function showUrlError(message) {
   urlErrorEl.textContent = message;
   urlErrorEl.hidden = !message;
-  urlInput.setAttribute('aria-invalid', message ? 'true' : 'false');
+  toggleInvalid(urlInput, message);
+}
+
+function showUsernameError(message) {
+  usernameErrorEl.textContent = message;
+  usernameErrorEl.hidden = !message;
+  toggleInvalid(usernameInput, message);
 }
 
 function showPasswordError(message) {
   passwordErrorEl.textContent = message;
   passwordErrorEl.hidden = !message;
-  passwordInput.setAttribute('aria-invalid', message ? 'true' : 'false');
+  toggleInvalid(passwordInput, message);
 }
 
 function clearErrors() {
   showUrlError('');
+  showUsernameError('');
   showPasswordError('');
 }
 
@@ -40,6 +53,7 @@ function hideStatus() {
 
 async function load() {
   urlInput.value = await getBackendUrl();
+  usernameInput.value = await getAppUsername();
   passwordInput.value = await getAppPassword();
 }
 
@@ -57,9 +71,18 @@ form.addEventListener('submit', async (event) => {
     return;
   }
 
+  const username = usernameInput.value.trim().toLowerCase();
   const password = passwordInput.value.trim();
-  if (!isLocalBackend(saved) && !password) {
-    showPasswordError('Enter the app password for the online dashboard.');
+  const remote = !isLocalBackend(saved);
+
+  if (remote && !username) {
+    showUsernameError('Enter your username for the online dashboard.');
+    usernameInput.focus();
+    return;
+  }
+
+  if (remote && !password) {
+    showPasswordError('Enter your password for the online dashboard.');
     passwordInput.focus();
     return;
   }
@@ -69,17 +92,19 @@ form.addEventListener('submit', async (event) => {
 
   try {
     await setBackendUrl(saved);
+    await setAppUsername(username);
     await setAppPassword(password, saved);
     urlInput.value = saved;
+    usernameInput.value = username;
     passwordInput.value = password;
     showStatus(
-      isLocalBackend(saved)
-        ? 'Saved. Requests will go to the local server.'
-        : 'Saved. Requests will be sent directly to the online dashboard.',
+      remote
+        ? 'Saved. Requests will be sent directly to the online dashboard.'
+        : 'Saved. Requests will go to the local server.',
       'success'
     );
   } catch (err) {
-    showUrlError(err.message);
+    showUsernameError(err.message);
   } finally {
     saveButton.disabled = false;
     saveButton.textContent = 'Save';
@@ -88,6 +113,11 @@ form.addEventListener('submit', async (event) => {
 
 urlInput.addEventListener('input', () => {
   showUrlError('');
+  hideStatus();
+});
+
+usernameInput.addEventListener('input', () => {
+  showUsernameError('');
   hideStatus();
 });
 

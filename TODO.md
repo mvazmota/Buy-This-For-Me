@@ -56,4 +56,5 @@ is possible.
 - [x] Discord notifications for new requests (live).
 - [x] ntfy sender with optional access token. Disabled: ntfy.sh rate-limits Cloudflare's shared
       egress IPs.
-- [x] 138 automated tests.
+- [x] Username/password accounts with roles: `admin` edits and deletes, `user` adds and reads.
+- [x] 141 automated tests.

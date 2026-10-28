@@ -1,6 +1,8 @@
-// Signed, expiring session cookies for the Cloudflare Worker.
-// The only secret involved is the APP_PASSWORD Worker secret; it never leaves
-// the Worker and is only used to derive the HMAC key.
+// Signed, expiring session cookies carrying the account name and role.
+// The HMAC key comes from the SESSION_SECRET Worker secret; it never leaves
+// the Worker and is never logged.
+
+import { toBase64Url, fromBase64Url, isValidRole, normalizeUsername } from './auth.js';
 
 const encoder = new TextEncoder();
 
@@ -8,95 +10,72 @@ export const COOKIE_NAME = 'bifm_session';
 export const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 const MAX_TOKEN_LENGTH = 4096;
 
-function bytesToBase64Url(bytes) {
-  let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
-function base64UrlToBytes(value) {
-  if (typeof value !== 'string' || !/^[A-Za-z0-9_-]+$/.test(value)) return null;
-  const padded = value.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (value.length % 4)) % 4);
-  try {
-    const binary = atob(padded);
-    const bytes = new Uint8Array(binary.length);
-    for (let index = 0; index < binary.length; index += 1) {
-      bytes[index] = binary.charCodeAt(index);
-    }
-    return bytes;
-  } catch {
-    return null;
-  }
-}
-
-function sessionKey(password) {
+function sessionKey(secret) {
   return crypto.subtle.importKey(
     'raw',
-    encoder.encode(`bifm-session:${password}`),
+    encoder.encode(`bifm-session:${secret}`),
     { name: 'HMAC', hash: 'SHA-256' },
     false,
     ['sign', 'verify']
   );
 }
 
-/** Create a signed token containing only an expiry timestamp. */
-export async function createSessionToken(password, now = Date.now()) {
-  if (typeof password !== 'string' || password.length === 0) {
-    throw new Error('Cannot create a session without a password.');
+/**
+ * Build a signed token for one account.
+ * @param {{username: string, role: string}} account
+ * @param {string} secret
+ */
+export async function createSessionToken(account, secret, now = Date.now()) {
+  if (typeof secret !== 'string' || secret.length === 0) {
+    throw new Error('Cannot create a session without a secret.');
   }
+  const username = normalizeUsername(account && account.username);
+  const role = account && account.role;
+  if (!username || !isValidRole(role)) {
+    throw new Error('Cannot create a session without a valid account.');
+  }
+
   const expiresAt = Math.floor(now / 1000) + SESSION_TTL_SECONDS;
-  const payload = bytesToBase64Url(encoder.encode(JSON.stringify({ exp: expiresAt })));
-  const key = await sessionKey(password);
+  const payload = toBase64Url(encoder.encode(JSON.stringify({ u: username, r: role, exp: expiresAt })));
+  const key = await sessionKey(secret);
   const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(payload));
-  return `${payload}.${bytesToBase64Url(new Uint8Array(signature))}`;
-}
-
-/** Verify signature and expiry with WebCrypto. Returns a boolean, never throws. */
-export async function verifySessionToken(token, password, now = Date.now()) {
-  try {
-    if (typeof token !== 'string' || token.length === 0 || token.length > MAX_TOKEN_LENGTH) return false;
-    if (typeof password !== 'string' || password.length === 0) return false;
-
-    const separator = token.indexOf('.');
-    if (separator < 1 || separator !== token.lastIndexOf('.')) return false;
-
-    const payload = token.slice(0, separator);
-    const signature = base64UrlToBytes(token.slice(separator + 1));
-    if (!signature || signature.length !== 32) return false;
-
-    const key = await sessionKey(password);
-    const valid = await crypto.subtle.verify('HMAC', key, signature, encoder.encode(payload));
-    if (!valid) return false;
-
-    const payloadBytes = base64UrlToBytes(payload);
-    if (!payloadBytes) return false;
-    const decoded = JSON.parse(new TextDecoder().decode(payloadBytes));
-    if (!decoded || typeof decoded.exp !== 'number' || !Number.isFinite(decoded.exp)) return false;
-    return decoded.exp > Math.floor(now / 1000);
-  } catch {
-    return false;
-  }
+  return `${payload}.${toBase64Url(new Uint8Array(signature))}`;
 }
 
 /**
- * Compare a submitted password to the configured one without an early exit.
- * Both values are hashed first so the comparison length is fixed.
+ * Verify signature and expiry. Returns { username, role } or null.
+ * Never throws.
  */
-export async function passwordMatches(submitted, expected) {
-  if (typeof submitted !== 'string' || typeof expected !== 'string' || expected.length === 0) {
-    return false;
+export async function verifySessionToken(token, secret, now = Date.now()) {
+  try {
+    if (typeof token !== 'string' || token.length === 0 || token.length > MAX_TOKEN_LENGTH) return null;
+    if (typeof secret !== 'string' || secret.length === 0) return null;
+
+    const separator = token.indexOf('.');
+    if (separator < 1 || separator !== token.lastIndexOf('.')) return null;
+
+    const payload = token.slice(0, separator);
+    const signature = fromBase64Url(token.slice(separator + 1));
+    if (!signature || signature.length !== 32) return null;
+
+    const key = await sessionKey(secret);
+    const valid = await crypto.subtle.verify('HMAC', key, signature, encoder.encode(payload));
+    if (!valid) return null;
+
+    const payloadBytes = fromBase64Url(payload);
+    if (!payloadBytes) return null;
+
+    const decoded = JSON.parse(new TextDecoder().decode(payloadBytes));
+    if (!decoded || typeof decoded.exp !== 'number' || !Number.isFinite(decoded.exp)) return null;
+    if (decoded.exp <= Math.floor(now / 1000)) return null;
+
+    const username = normalizeUsername(decoded.u);
+    if (!username || !isValidRole(decoded.r)) return null;
+
+    return { username, role: decoded.r };
+  } catch {
+    return null;
   }
-  const [left, right] = await Promise.all([
-    crypto.subtle.digest('SHA-256', encoder.encode(submitted)),
-    crypto.subtle.digest('SHA-256', encoder.encode(expected)),
-  ]);
-  const a = new Uint8Array(left);
-  const b = new Uint8Array(right);
-  let difference = 0;
-  for (let index = 0; index < a.length; index += 1) {
-    difference |= a[index] ^ b[index];
-  }
-  return difference === 0;
 }
 
 export function readCookie(cookieHeader, name) {

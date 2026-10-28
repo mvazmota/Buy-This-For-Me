@@ -39,7 +39,22 @@
         </div>
 
         <div class="field">
-          <label for="app-password">App password</label>
+          <label for="app-username">Username</label>
+          <input
+            id="app-username"
+            name="app-username"
+            type="text"
+            spellcheck="false"
+            autocapitalize="none"
+            autocomplete="username"
+            placeholder="Your account name"
+            aria-describedby="username-error"
+          />
+          <p id="username-error" class="field-error" role="alert" hidden></p>
+        </div>
+
+        <div class="field">
+          <label for="app-password">Password</label>
           <div class="password-row">
             <input
               id="app-password"
@@ -47,7 +62,7 @@
               type="password"
               spellcheck="false"
               autocomplete="off"
-              placeholder="The online dashboard password"
+              placeholder="Your account password"
               aria-describedby="password-note password-error"
             />
             <button
@@ -62,8 +77,8 @@
             </button>
           </div>
           <p id="password-note" class="field-note">
-            Stored in this browser only and used only to send requests to the online dashboard.
-            Leave empty when using the local server.
+            Your account details are stored in this browser only and used only to send requests to
+            the online dashboard. Leave both empty when using the local server.
           </p>
           <p id="password-error" class="field-error" role="alert" hidden></p>
         </div>

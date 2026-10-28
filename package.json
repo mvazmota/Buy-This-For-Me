@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node server.js",
     "test": "node --test test/api.test.js test/worker.test.js test/notify.test.js test/discord.test.js test/extension.test.js test/dashboard.test.js test/price.test.js",
-    "check": "node --check src/worker.js && node --check src/session.js && node --check src/notify.js && node --check public/list-utils.js && node --check public/app.js && node --check extension/settings.js && node --check extension/url-utils.js && node --check extension/price-extractor.js && node --check extension/popup.js && node --check extension/options.js && node --check scripts/make-icons.js",
+    "check": "node --check src/worker.js && node --check src/session.js && node --check src/auth.js && node --check src/notify.js && node --check public/list-utils.js && node --check public/app.js && node --check extension/settings.js && node --check extension/url-utils.js && node --check extension/price-extractor.js && node --check extension/popup.js && node --check extension/options.js && node --check scripts/make-icons.js",
+    "seed:users": "node scripts/seed-users.mjs",
     "dev:worker": "wrangler dev",
     "deploy": "wrangler deploy",
     "db:create": "wrangler d1 create buy-this-for-me",

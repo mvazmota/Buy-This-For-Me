@@ -1,14 +1,15 @@
 // Cloudflare Worker API + static dashboard for BIFM.
-// API routes are same-origin, password-protected with the APP_PASSWORD secret,
-// and store requests in D1. Everything else is served from the ASSETS binding.
+// API routes are same-origin and store requests in D1. Accounts live in the
+// `users` table: a session cookie (HMAC-signed with SESSION_SECRET) carries the
+// username and role. Admins can edit and delete; users can add and view.
 
 import validateModule from '../lib/validate.js';
+import { authenticate, normalizeUsername } from './auth.js';
 import { notifyNewRequest } from './notify.js';
 import {
   COOKIE_NAME,
   clearSessionCookie,
   createSessionToken,
-  passwordMatches,
   readCookie,
   sessionCookie,
   verifySessionToken,
@@ -103,17 +104,22 @@ function isSameOrigin(request, url) {
   return true;
 }
 
-function configuredPassword(env) {
-  return typeof env.APP_PASSWORD === 'string' && env.APP_PASSWORD.length > 0
-    ? env.APP_PASSWORD
+function configuredSecret(env) {
+  return typeof env.SESSION_SECRET === 'string' && env.SESSION_SECRET.length > 0
+    ? env.SESSION_SECRET
     : null;
 }
 
-async function isAuthenticated(request, env) {
-  const password = configuredPassword(env);
-  if (!password) return false;
+/** Current session as { username, role }, or null. */
+async function getSession(request, env) {
+  const secret = configuredSecret(env);
+  if (!secret) return null;
   const token = readCookie(request.headers.get('cookie'), COOKIE_NAME);
-  return verifySessionToken(token, password);
+  return verifySessionToken(token, secret);
+}
+
+function isAdmin(session) {
+  return Boolean(session && session.role === 'admin');
 }
 
 async function listRequests(env) {
@@ -199,12 +205,16 @@ async function deleteRequest(env, id) {
   return changes > 0;
 }
 
-async function isExtensionAuthorized(request, env) {
-  const submitted = request.headers.get('x-app-password');
-  if (submitted === null) return false;
-  const password = configuredPassword(env);
-  if (!password) return false;
-  return passwordMatches(submitted, password);
+/**
+ * Authenticate the extension with its own credentials. The extension cannot
+ * hold a session cookie, so it sends X-App-Username and X-App-Password and gets
+ * read/add access only. PATCH and DELETE always need the dashboard cookie.
+ */
+async function authenticateExtension(request, env) {
+  const username = request.headers.get('x-app-username');
+  const password = request.headers.get('x-app-password');
+  if (username === null || password === null) return null;
+  return authenticate(env, username, password);
 }
 
 /**
@@ -230,8 +240,8 @@ async function notifyCreated(env, created, origin, ctx) {
   }
 }
 
-async function handleRequests(request, env, url, extensionAuthorized = false, ctx = null) {
-  if (!extensionAuthorized && !(await isAuthenticated(request, env))) {
+async function handleRequests(request, env, url, session = null, ctx = null) {
+  if (!session) {
     return json({ error: 'Authentication required.' }, 401);
   }
 
@@ -263,6 +273,9 @@ async function handleRequests(request, env, url, extensionAuthorized = false, ct
   }
 
   if (request.method === 'DELETE') {
+    if (!isAdmin(session)) {
+      return json({ error: 'Only an admin can delete requests.' }, 403);
+    }
     const removed = await deleteRequest(env, id);
     if (!removed) return json({ error: 'Request not found.' }, 404);
     return json({ deleted: true, id });
@@ -270,6 +283,10 @@ async function handleRequests(request, env, url, extensionAuthorized = false, ct
 
   if (request.method !== 'PATCH') {
     return json({ error: 'Method not allowed. Use PATCH or DELETE.' }, 405);
+  }
+
+  if (!isAdmin(session)) {
+    return json({ error: 'Only an admin can edit requests.' }, 403);
   }
 
   const body = await readJsonBody(request);
@@ -288,36 +305,44 @@ async function handleLogin(request, env) {
     return json({ error: 'Method not allowed. Use POST.' }, 405);
   }
 
-  const password = configuredPassword(env);
-  if (!password) {
-    // Do not reveal whether a secret exists or what it is.
+  const secret = configuredSecret(env);
+  if (!secret) {
+    // Do not reveal whether configuration is missing or what it is.
     return json({ error: 'Login is not available.' }, 503);
   }
 
   const body = await readJsonBody(request);
-  const submitted = body && typeof body === 'object' && !Array.isArray(body) ? body.password : undefined;
-  if (!(await passwordMatches(submitted, password))) {
-    return json({ error: 'Invalid password.' }, 401);
+  const payload = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
+  const username = normalizeUsername(payload.username);
+  const password = typeof payload.password === 'string' ? payload.password : '';
+
+  if (!username || !password) {
+    return json({ error: 'Enter your username and password.' }, 400);
   }
 
-  const token = await createSessionToken(password);
-  return json({ authenticated: true, authRequired: true }, 200, {
-    'Set-Cookie': sessionCookie(token),
-  });
+  const account = await authenticate(env, username, password);
+  if (!account) {
+    return json({ error: 'Invalid username or password.' }, 401);
+  }
+
+  const token = await createSessionToken(account, secret);
+  return json(
+    { authenticated: true, authRequired: true, username: account.username, role: account.role },
+    200,
+    { 'Set-Cookie': sessionCookie(token) }
+  );
 }
 
 async function handleApi(request, env, url, ctx = null) {
-  // The extension talks to /api/requests directly with the app password in the
-  // X-App-Password header: it reads the list to warn about duplicates and posts
-  // new requests. That header only bypasses the same-origin check and the
-  // session cookie for GET/POST on that one route. PATCH and DELETE still need
-  // the login cookie.
+  // The extension posts with X-App-Username and X-App-Password: it can read the
+  // list (duplicate warning) and add requests only. PATCH and DELETE always need
+  // the dashboard session cookie.
   const extensionPath =
     url.pathname === '/api/requests' &&
     (request.method === 'GET' || request.method === 'POST');
-  const extensionAuthorized = extensionPath && (await isExtensionAuthorized(request, env));
+  const extensionAccount = extensionPath ? await authenticateExtension(request, env) : null;
 
-  if (!extensionAuthorized && !isSameOrigin(request, url)) {
+  if (!extensionAccount && !isSameOrigin(request, url)) {
     return extensionPath
       ? json({ error: 'Authentication required.' }, 401)
       : json({ error: 'Cross-origin requests are not allowed.' }, 403);
@@ -334,7 +359,13 @@ async function handleApi(request, env, url, ctx = null) {
     if (request.method !== 'GET') {
       return json({ error: 'Method not allowed. Use GET.' }, 405);
     }
-    return json({ authenticated: await isAuthenticated(request, env), authRequired: true });
+    const session = await getSession(request, env);
+    return json({
+      authenticated: Boolean(session),
+      authRequired: true,
+      username: session ? session.username : null,
+      role: session ? session.role : null,
+    });
   }
 
   if (url.pathname === '/api/login') {
@@ -351,7 +382,8 @@ async function handleApi(request, env, url, ctx = null) {
   }
 
   if (url.pathname === '/api/requests' || url.pathname.startsWith('/api/requests/')) {
-    return handleRequests(request, env, url, extensionAuthorized, ctx);
+    const session = extensionAccount || (await getSession(request, env));
+    return handleRequests(request, env, url, session, ctx);
   }
 
   return json({ error: 'API route not found.' }, 404);

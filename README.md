@@ -6,14 +6,15 @@ Workers with D1 storage, or on your own PC as a local development prototype. The
 sends to the deployed Worker at `https://buy-this-for-me.m-vaz-mota.workers.dev` by default;
 the local server is an explicit opt-in for development.
 
-- **Online mode (default):** Cloudflare Worker + D1 + static dashboard from `public/`,
-  protected by the `APP_PASSWORD` Worker secret. HTTPS only on `workers.dev`. The extension
-  posts requests straight to the Worker with the saved app password; no dashboard tab opens.
-- **Local mode (optional):** `npm start`, no password, data in `data/requests.json`. Binds to
+- **Online mode (default):** Cloudflare Worker + D1 + static dashboard from `public/`, with
+  username/password accounts in D1 and role-based permissions. HTTPS only on `workers.dev`.
+  The extension posts requests straight to the Worker with its saved account; no dashboard tab
+  opens.
+- **Local mode (optional):** `npm start`, no login, data in `data/requests.json`. Binds to
   `127.0.0.1` only. Never expose it to the internet. Requires saving
   `http://127.0.0.1:3000` in the extension settings.
-- No accounts, no npm framework, no build step for the dashboard. Wrangler is the only
-  development dependency and is needed only for Cloudflare work.
+- No npm framework and no build step for the dashboard. Wrangler is the only development
+  dependency and is needed only for Cloudflare work.
 - Tested with Node.js v24.21.0 on Windows 11. The local server needs Node 18+; Wrangler
   4.152 needs Node 22+.
 
@@ -95,7 +96,7 @@ extension settings. The local server binds to loopback only.
    price (JSON-LD, `product:price:amount`/`og:price:amount` meta tags, or `itemprop="price"`),
    the popup fills the empty price field. Extraction is best effort: it never overwrites a
    price you typed, and it silently does nothing on pages that expose no price. By default
-   this sends directly to the online Worker, so save the app password in the extension
+   this sends directly to the online Worker, so save your account details in the extension
    settings first (section 2).
    See below to switch to the local server. Before sending, the popup reads the list and warns
    when the same normalized link is already there; choose **Add anyway** or **Cancel**.
@@ -112,7 +113,7 @@ and the App password together.
 
 | Backend URL | Behaviour |
 | --- | --- |
-| `https://buy-this-for-me.m-vaz-mota.workers.dev` (default) | Sends the request directly to the Worker from the popup. No new tab. Requires the app password to be saved in the extension settings. |
+| `https://buy-this-for-me.m-vaz-mota.workers.dev` (default) | Sends the request directly to the Worker from the popup. No new tab. Requires a saved username and password in the extension settings. |
 | `http://127.0.0.1:3000` | Explicit local override. Posts directly to the local server started with `npm start`. No password. |
 
 The extension uses the deployed Worker when no backend URL is saved. Saving a value replaces
@@ -124,7 +125,7 @@ Rules for the settings:
 
 - Use the dashboard **root** URL. No `/api`, query string, or `#fragment`.
 - A remote URL must use `https://`. Plain `http://` is accepted only for the local server.
-- The app password is saved in `chrome.storage.local` in this browser profile only, and is
+- The username and password are saved in `chrome.storage.local` in this browser profile only, and is
   used only for `GET`/`POST /api/requests` on the configured Worker (GET feeds the duplicate
   warning). It is never committed to the project. Saving a remote URL without a password is
   rejected with a field error.
@@ -136,7 +137,7 @@ Rules for the settings:
 | Permission | Why |
 | --- | --- |
 | `activeTab` | Read the active tab's title and URL only when you click the extension icon. |
-| `storage` | Remember the dashboard URL and the app password chosen in the extension settings. |
+| `storage` | Remember the dashboard URL, username and password chosen in the extension settings. |
 | `scripting` | Inject `price-extractor.js` into the active tab (click-triggered) to read the product price. No broad host permissions are requested. |
 | Host permissions for `http://127.0.0.1:3000/*`, `http://localhost:3000/*` and `https://buy-this-for-me.m-vaz-mota.workers.dev/*` | Allow the popup to POST directly to the local server and to the deployed Worker. |
 
@@ -157,7 +158,7 @@ price lookup is skipped.
 - Statuses save immediately: **New**, **Purchased**, **Done**, **Not buying**.
 - If an update fails, the menu reverts and an error banner explains why.
 - The page refreshes every 15 seconds and has a **Refresh** button.
-- Online, the dashboard asks for the app password. After login it uses a signed, HttpOnly,
+- Online, the dashboard asks for your username and password. After login it uses a signed, HttpOnly,
   Secure, SameSite=Lax cookie valid for 7 days. **Log out** clears it. If the session expires
   while the page is open, the dashboard returns to the login view; requests added from the
   extension do not depend on this cookie.
@@ -229,7 +230,7 @@ error (generic message). A request defaults to status `New` and records `submitt
 `updatedAt` as ISO timestamps.
 
 Online, `/api/requests` and `/api/requests/:id` return `401` until the login cookie is valid.
-The exception is `GET`/`POST /api/requests`: the extension sends its saved app password in the
+The exception is `GET`/`POST /api/requests`: the extension sends its saved account credentials in the
 `X-App-Password` header, and a valid value authorises that single request without a cookie. A
 missing or wrong header on a cross-origin call returns `401` and stores nothing. `PATCH` never
 accepts the header as a substitute for the cookie. Login
@@ -268,7 +269,7 @@ backend. The Worker handles
 through the `ASSETS` binding. `workers.dev` is enabled.
 
 Nothing in this section has been run against a Cloudflare account here. You must supply the
-account, database id and app password.
+account, database id and session secret.
 
 ### 7.1 Requirements
 
@@ -334,27 +335,47 @@ Worker now exists, but login is still unavailable until the secret is set in ste
 If Wrangler complains that the database id is invalid, the placeholder in `wrangler.jsonc` was
 not replaced.
 
-### 7.5 Set the app password secret
+### 7.5 Set up accounts and the session secret
 
-Generate a long random password, then store it **only** as a Worker secret:
+Accounts live in the D1 `users` table, so there is no shared app password any more. Each person
+has a username, a PBKDF2 password hash, and a role:
 
-```powershell
-node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"
-npx wrangler secret put APP_PASSWORD
-```
+- **admin** — can add, view, edit and delete.
+- **user** — can add and view only.
 
-Paste the password when prompted. It is stored encrypted by Cloudflare and is not written to
-this repository. Do not put it in `wrangler.jsonc`, `.dev.vars`, a build command, or the
-source. You enter it once in the extension settings; there it is saved only in that browser
-profile (`chrome.storage.local`) so the popup can post requests directly.
-`wrangler secret put` needs the Worker to exist, which is why the first deploy comes
-first. To rotate the password later, run the command again; this invalidates existing session
-cookies and requires updating the extension settings.
+1. Generate the session signing key and store it as a Worker secret:
+   ```powershell
+   node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"
+   npx wrangler secret put SESSION_SECRET
+   ```
+2. Create accounts with the seed script. It writes `seeds/test-users.sql` (git-ignored) with
+   hashed passwords:
+   ```powershell
+   npm run seed:users
+   ```
+3. Apply it to the live database:
+   ```powershell
+   npx wrangler d1 execute buy-this-for-me --remote --file seeds/test-users.sql
+   ```
 
-Open the deployed URL, log in with the password, and add a test request. Then save that root
-URL and the same password in the extension settings (section 2) and send a test request from
-a product page. If login returns "Login is not available", the `APP_PASSWORD` secret is
-missing for that Worker.
+The seed script creates two **test** accounts, both with the password `1234`:
+
+| Username | Role |
+| --- | --- |
+| `martin` | admin |
+| `alex` | user |
+
+**Change both passwords before real use.** Edit `scripts/seed-users.mjs`, re-run it, and apply
+the file again; the upsert updates the hash for an existing account.
+
+`SESSION_SECRET` signs the login cookie. Rotating it logs everyone out. It is separate from
+`APP_PASSWORD`, which is no longer used and can be deleted with
+`npx wrangler secret delete APP_PASSWORD`. If login returns "Login is not available", the
+`SESSION_SECRET` secret is missing for that Worker.
+
+Open the deployed URL, log in, and add a test request. Then save the Worker URL, your username
+and your password in the extension settings (section 2) and send a test request from a product
+page.
 
 ### 7.6 Push notifications with ntfy (optional)
 
@@ -441,7 +462,7 @@ deployment. Finish steps 7.2–7.5 before connecting anything: create the D1 dat
 (`npx wrangler d1 create buy-this-for-me`), replace the placeholder `database_id` in
 `wrangler.jsonc` with the real id, apply the migration with
 `npx wrangler d1 migrations apply buy-this-for-me --remote`, deploy once with
-`npx wrangler deploy`, and set the `APP_PASSWORD` secret. Connecting Builds afterwards only
+`npx wrangler deploy`, and set the `SESSION_SECRET` secret. Connecting Builds afterwards only
 automates deploys of later commits.
 
 1. Commit and push the project to GitHub. The real D1 id from step 7.2 and the new files must
@@ -463,7 +484,7 @@ automates deploys of later commits.
    ```
 9. Save. Cloudflare installs from `package-lock.json`, runs the tests and syntax checks, then
    deploys the Worker.
-10. Make sure `APP_PASSWORD` exists on the Worker (step 7.5). Worker secrets are runtime
+10. Make sure `SESSION_SECRET` exists on the Worker (step 7.5). Worker secrets are runtime
     configuration and are not committed or created by the build.
 
 Connecting Builds does not change the running Worker; it enables deployments on future work.
@@ -477,7 +498,7 @@ yourself before pushing code that needs a new one.
    should return `{"ok":true}`.
 2. Open `https://buy-this-for-me.m-vaz-mota.workers.dev/` in a private window. You should see
    the login form, not the list.
-3. Log in with `APP_PASSWORD`. The dashboard should load (empty at first).
+3. Log in with one of the seeded accounts. The dashboard should load (empty at first).
 4. Add a request from the dashboard's API or the extension and confirm it appears after a
    refresh and after a Worker redeploy (it lives in D1).
 5. Log out and confirm the list is no longer shown.
@@ -504,13 +525,13 @@ URL never reaches the online Worker.
   `127.0.0.1`. Do not port-forward it, tunnel it, reverse-proxy it, or bind it to `0.0.0.0`.
 - **Online mode uses one shared password.** Everyone with the password sees and can change
   every request. There are no individual accounts, audit trails, or per-person permissions.
-- The session cookie is HMAC-signed with a key derived from `APP_PASSWORD`, is HttpOnly,
+- The session cookie is HMAC-signed with a key derived from `SESSION_SECRET`, is HttpOnly,
   Secure and SameSite=Lax, and expires after 7 days. Logging out clears it; rotating the
   secret invalidates all sessions.
 - The API rejects cross-origin calls and returns generic login/internal errors. No CORS
   headers are added. The only cross-origin exception is the extension's `GET`/`POST
   /api/requests` with a valid `X-App-Password` header. Request bodies are capped at 64 KB.
-- `APP_PASSWORD` is a Cloudflare Worker secret. The extension also saves the same password in
+- `SESSION_SECRET` is a Cloudflare Worker secret. The extension also saves each account password in
   `chrome.storage.local` in this browser profile for direct submissions (family-only accepted
   risk). It is never committed to git and never hardcoded in source. Do not reuse an important
   password.
@@ -539,9 +560,9 @@ URL never reaches the online Worker.
 | `Port 3000 is already in use` | Stop the other process. The extension only supports port 3000 without a manifest change. |
 | Dashboard shows "Could not load requests" | Local: server stopped or wrong port. Online: check the Worker URL and login. Press Refresh. |
 | Online dashboard shows the login form after working | The 7-day session expired or the secret was rotated. Log in again. |
-| Login says "Login is not available" | The Worker has no `APP_PASSWORD` secret. Run `npx wrangler secret put APP_PASSWORD`. |
+| Login says "Login is not available" | The Worker has no `SESSION_SECRET` secret. Run `npx wrangler secret put SESSION_SECRET`. |
 | `wrangler deploy` rejects the database id | Replace the all-zero placeholder in `wrangler.jsonc` with the id from `wrangler d1 create`. |
-| Popup says "Password is missing or wrong" | Open the extension settings and save the current app password. Rotating the Worker secret requires updating it there too. |
+| Popup says "Password is missing or wrong" | Open the extension settings and save the current username and password. |
 | Popup says it cannot reach the online server | Check the network connection and the Dashboard URL in extension settings; the Worker URL must be the `https://` root with no path. |
 | Title/link not pre-filled | Click the icon on a normal `http(s)` page. Reload the extension after file edits. |
 | Price not pre-filled from the page | Extraction is best effort (JSON-LD, price meta tags, `itemprop="price"`). Type it manually; any found price is only a suggestion. |

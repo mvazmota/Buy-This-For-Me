@@ -300,9 +300,10 @@ async function sendToLocal(payload) {
 }
 
 async function sendToRemote(payload) {
+  const username = await getAppUsername();
   const password = await getAppPassword();
-  if (!password) {
-    showStatus('No app password saved. Add it in Settings, then try again.', 'error');
+  if (!username || !password) {
+    showStatus('No account saved. Add your username and password in Settings, then try again.', 'error');
     return false;
   }
 
@@ -311,6 +312,7 @@ async function sendToRemote(payload) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'X-App-Username': username,
         'X-App-Password': password,
       },
       body: JSON.stringify(payload),
@@ -319,7 +321,7 @@ async function sendToRemote(payload) {
     const data = await response.json().catch(() => ({}));
 
     if (response.status === 401) {
-      showStatus('Password is missing or wrong. Update it in Settings.', 'error');
+      showStatus('Username or password is wrong. Update it in Settings.', 'error');
       return false;
     }
 
@@ -350,8 +352,10 @@ async function sendToRemote(payload) {
 async function fetchKnownRequests() {
   const headers = {};
   if (!isLocalBackend(backendUrl)) {
+    const username = await getAppUsername();
     const password = await getAppPassword();
-    if (!password) throw new Error('no app password is saved');
+    if (!username || !password) throw new Error('no account is saved');
+    headers['X-App-Username'] = username;
     headers['X-App-Password'] = password;
   }
 

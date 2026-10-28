@@ -4,6 +4,7 @@
 const DEFAULT_BACKEND_URL = 'https://buy-this-for-me.m-vaz-mota.workers.dev';
 const BACKEND_STORAGE_KEY = 'backendUrl';
 const APP_PASSWORD_STORAGE_KEY = 'appPassword';
+const APP_USERNAME_STORAGE_KEY = 'appUsername';
 const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost']);
 
 function isLocalBackend(urlValue) {
@@ -79,6 +80,27 @@ async function getBackendUrl() {
 async function setBackendUrl(value) {
   const normalized = normalizeBackendUrl(value);
   await chrome.storage.local.set({ [BACKEND_STORAGE_KEY]: normalized });
+  return normalized;
+}
+
+/**
+ * Read the saved account name, if any. Like the password it lives in this
+ * browser profile only and is sent only to the configured backend.
+ */
+async function getAppUsername() {
+  try {
+    const stored = await chrome.storage.local.get(APP_USERNAME_STORAGE_KEY);
+    const value = stored[APP_USERNAME_STORAGE_KEY];
+    return typeof value === 'string' ? value.trim() : '';
+  } catch {
+    return '';
+  }
+}
+
+/** Save or clear the account name. Lowercased, matching the server. */
+async function setAppUsername(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  await chrome.storage.local.set({ [APP_USERNAME_STORAGE_KEY]: normalized });
   return normalized;
 }
 

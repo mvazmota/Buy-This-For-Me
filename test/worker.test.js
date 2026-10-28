@@ -5,6 +5,12 @@ const test = require('node:test');
 
 const WORKER_URL = 'https://buy-this-for-me.example.workers.dev';
 const PASSWORD = 'correct horse battery staple';
+const SESSION_SECRET = 'test-session-secret-9f3a';
+// Precomputed PBKDF2 hashes so the fake D1 has accounts without an async setup.
+const ADMIN_PASSWORD_HASH =
+  'pbkdf2$120000$ljs4H7WiX1-l1EjsgyQllw$s_yC-877_DOWRZ6qmqgilU53xYII3bIPWKMgD3CyFE4';
+const MEMBER_PASSWORD_HASH =
+  'pbkdf2$120000$LcBvyujJAhwhnEmIstwcUQ$PFGN_bTkE0bBz6B7oHweroa-WNODid35nKSquBiuN8Y';
 
 // Node 18 does not expose global WebCrypto by default; the Worker tests need it.
 const hasWebCrypto = Boolean(globalThis.crypto && globalThis.crypto.subtle);
@@ -17,12 +23,17 @@ async function readJson(response) {
   return response.json();
 }
 
-function login(password = PASSWORD) {
+function login(password = PASSWORD, username = 'martin') {
   return new Request(`${WORKER_URL}/api/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ password }),
+    body: JSON.stringify({ username, password }),
   });
+}
+
+/** Extension credentials: the member account sends requests without a cookie. */
+function extensionHeaders(password = '1234', username = 'alex') {
+  return { 'X-App-Username': username, 'X-App-Password': password };
 }
 
 function cookieFrom(response) {
@@ -33,9 +44,24 @@ function cookieFrom(response) {
 /** Tiny D1 stand-in that understands the Worker's SQL statements. */
 function createFakeD1() {
   const rows = [];
+  const users = [
+    {
+      username: 'martin',
+      password_hash: ADMIN_PASSWORD_HASH,
+      role: 'admin',
+      created_at: '2026-10-01T00:00:00.000Z',
+    },
+    {
+      username: 'alex',
+      password_hash: MEMBER_PASSWORD_HASH,
+      role: 'user',
+      created_at: '2026-10-01T00:00:00.000Z',
+    },
+  ];
 
   return {
     rows,
+    users,
     prepare(sql) {
       let args = [];
       return {
@@ -52,6 +78,9 @@ function createFakeD1() {
           throw new Error(`Unexpected all() query: ${sql}`);
         },
         async first() {
+          if (/FROM users WHERE username = \?/i.test(sql)) {
+            return users.find((user) => user.username === args[0]) || null;
+          }
           if (/FROM requests WHERE id = \?/i.test(sql)) {
             return rows.find((row) => row.id === args[0]) || null;
           }
@@ -106,7 +135,7 @@ function createFakeD1() {
 
 function envWithDb(extra = {}) {
   return {
-    APP_PASSWORD: PASSWORD,
+    SESSION_SECRET,
     DB: createFakeD1(),
     ASSETS: { fetch: async () => new Response('asset') },
     ...extra,
@@ -149,19 +178,32 @@ async function quietly(fn) {
 
 workerTest('session tokens are signed, expiring and tamper-evident', async () => {
   const { createSessionToken, verifySessionToken, SESSION_TTL_SECONDS } = await loadSession();
+  const account = { username: 'martin', role: 'admin' };
 
-  const token = await createSessionToken(PASSWORD);
-  assert.equal(await verifySessionToken(token, PASSWORD), true);
-  assert.equal(await verifySessionToken(token, 'wrong password'), false);
-  assert.equal(await verifySessionToken(`${token}x`, PASSWORD), false);
-  assert.equal(await verifySessionToken('not-a-token', PASSWORD), false);
-  assert.equal(await verifySessionToken(token, ''), false);
+  const token = await createSessionToken(account, SESSION_SECRET);
+  assert.deepEqual(await verifySessionToken(token, SESSION_SECRET), {
+    username: 'martin',
+    role: 'admin',
+  });
+  assert.equal(await verifySessionToken(token, 'wrong secret'), null);
+  assert.equal(await verifySessionToken(`${token}x`, SESSION_SECRET), null);
+  assert.equal(await verifySessionToken('not-a-token', SESSION_SECRET), null);
+  assert.equal(await verifySessionToken(token, ''), null);
+
+  // A role change must not be forgeable: the payload is signed.
+  const memberToken = await createSessionToken({ username: 'alex', role: 'user' }, SESSION_SECRET);
+  const [payload, signature] = memberToken.split('.');
+  const forgedPayload = Buffer.from(JSON.stringify({ u: 'alex', r: 'admin', exp: 9999999999 }))
+    .toString('base64url');
+  assert.equal(await verifySessionToken(`${forgedPayload}.${signature}`, SESSION_SECRET), null);
+  assert.equal(await verifySessionToken(memberToken, SESSION_SECRET).then((s) => s.role), 'user');
 
   const expired = await createSessionToken(
-    PASSWORD,
+    account,
+    SESSION_SECRET,
     Date.now() - (SESSION_TTL_SECONDS + 60) * 1000
   );
-  assert.equal(await verifySessionToken(expired, PASSWORD), false);
+  assert.equal(await verifySessionToken(expired, SESSION_SECRET), null);
 });
 
 workerTest('health is public and request APIs require auth', async () => {
@@ -192,8 +234,12 @@ workerTest('login rejects wrong passwords with a generic error and no cookie', a
 
   const response = await worker.fetch(login('wrong password'), env);
   assert.equal(response.status, 401);
-  assert.deepEqual(await readJson(response), { error: 'Invalid password.' });
+  assert.deepEqual(await readJson(response), { error: 'Invalid username or password.' });
   assert.equal(response.headers.get('set-cookie'), null);
+
+  const unknown = await worker.fetch(login(PASSWORD, 'nobody'), env);
+  assert.equal(unknown.status, 401);
+  assert.deepEqual(await readJson(unknown), { error: 'Invalid username or password.' });
 });
 
 workerTest('login sets an HttpOnly, Secure, SameSite=Lax session cookie', async () => {
@@ -202,7 +248,12 @@ workerTest('login sets an HttpOnly, Secure, SameSite=Lax session cookie', async 
 
   const response = await worker.fetch(login(), env);
   assert.equal(response.status, 200);
-  assert.deepEqual(await readJson(response), { authenticated: true, authRequired: true });
+  assert.deepEqual(await readJson(response), {
+    authenticated: true,
+    authRequired: true,
+    username: 'martin',
+    role: 'admin',
+  });
 
   const setCookie = response.headers.get('set-cookie') || '';
   assert.match(setCookie, /^bifm_session=/);
@@ -216,7 +267,12 @@ workerTest('login sets an HttpOnly, Secure, SameSite=Lax session cookie', async 
     env
   );
   assert.equal(session.status, 200);
-  assert.deepEqual(await readJson(session), { authenticated: true, authRequired: true });
+  assert.deepEqual(await readJson(session), {
+    authenticated: true,
+    authRequired: true,
+    username: 'martin',
+    role: 'admin',
+  });
 });
 
 workerTest('logout clears the session cookie', async () => {
@@ -236,11 +292,114 @@ workerTest('cross-origin API requests are rejected', async () => {
   const request = new Request(`${WORKER_URL}/api/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Origin: 'https://evil.example' },
-    body: JSON.stringify({ password: PASSWORD }),
+    body: JSON.stringify({ username: 'martin', password: PASSWORD }),
   });
   const response = await worker.fetch(request, env);
   assert.equal(response.status, 403);
   assert.match((await readJson(response)).error, /Cross-origin/);
+});
+
+workerTest('a member can add and read but cannot edit or delete', async () => {
+  const worker = (await loadWorker()).default;
+  const env = envWithDb({ NTFY_TOPIC: '' });
+
+  const memberLogin = await worker.fetch(login('1234', 'alex'), env);
+  assert.equal(memberLogin.status, 200);
+  assert.equal((await readJson(memberLogin)).role, 'user');
+  const cookie = cookieFrom(memberLogin);
+
+  const created = await worker.fetch(
+    new Request(`${WORKER_URL}/api/requests`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ title: 'Book', url: 'https://example.com/book' }),
+    }),
+    env
+  );
+  assert.equal(created.status, 201);
+  const { request } = await readJson(created);
+
+  const listed = await worker.fetch(
+    new Request(`${WORKER_URL}/api/requests`, { headers: { Cookie: cookie } }),
+    env
+  );
+  assert.equal(listed.status, 200);
+
+  const patched = await worker.fetch(
+    new Request(`${WORKER_URL}/api/requests/${request.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ status: 'Done' }),
+    }),
+    env
+  );
+  assert.equal(patched.status, 403);
+  assert.match((await readJson(patched)).error, /admin/i);
+
+  const removed = await worker.fetch(
+    new Request(`${WORKER_URL}/api/requests/${request.id}`, {
+      method: 'DELETE',
+      headers: { Cookie: cookie },
+    }),
+    env
+  );
+  assert.equal(removed.status, 403);
+
+  // The row is untouched.
+  assert.equal(env.DB.rows.length, 1);
+  assert.equal(env.DB.rows[0].status, 'New');
+});
+
+workerTest('an admin can edit and delete', async () => {
+  const worker = (await loadWorker()).default;
+  const env = envWithDb({ NTFY_TOPIC: '' });
+
+  const adminLogin = await worker.fetch(login(), env);
+  const cookie = cookieFrom(adminLogin);
+
+  const created = await worker.fetch(
+    new Request(`${WORKER_URL}/api/requests`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ title: 'Book', url: 'https://example.com/book' }),
+    }),
+    env
+  );
+  const { request } = await readJson(created);
+
+  const patched = await worker.fetch(
+    new Request(`${WORKER_URL}/api/requests/${request.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ status: 'Done' }),
+    }),
+    env
+  );
+  assert.equal(patched.status, 200);
+
+  const removed = await worker.fetch(
+    new Request(`${WORKER_URL}/api/requests/${request.id}`, {
+      method: 'DELETE',
+      headers: { Cookie: cookie },
+    }),
+    env
+  );
+  assert.equal(removed.status, 200);
+  assert.equal(env.DB.rows.length, 0);
+});
+
+workerTest('extension headers cannot edit or delete even for an admin account', async () => {
+  const worker = (await loadWorker()).default;
+  const env = envWithDb({ NTFY_TOPIC: '' });
+
+  const response = await worker.fetch(
+    new Request(`${WORKER_URL}/api/requests/anything`, {
+      method: 'DELETE',
+      headers: { Origin: 'chrome-extension://abc', ...extensionHeaders('1234', 'martin') },
+    }),
+    env
+  );
+  assert.equal(response.status, 403);
 });
 
 workerTest('cross-origin GET allows a valid app password; other cross-origin calls stay blocked', async () => {
@@ -249,7 +408,7 @@ workerTest('cross-origin GET allows a valid app password; other cross-origin cal
 
   const authorized = await worker.fetch(
     new Request(`${WORKER_URL}/api/requests`, {
-      headers: { Origin: 'chrome-extension://abc', 'X-App-Password': PASSWORD },
+      headers: { Origin: 'chrome-extension://abc', ...extensionHeaders() },
     }),
     env
   );
@@ -258,7 +417,7 @@ workerTest('cross-origin GET allows a valid app password; other cross-origin cal
 
   for (const headers of [
     { Origin: 'https://evil.example' },
-    { Origin: 'https://evil.example', 'X-App-Password': 'wrong' },
+    { Origin: 'https://evil.example', 'X-App-Username': 'alex', 'X-App-Password': 'wrong' },
   ]) {
     const rejected = await worker.fetch(
       new Request(`${WORKER_URL}/api/requests`, { headers }),
@@ -275,7 +434,8 @@ workerTest('cross-origin GET allows a valid app password; other cross-origin cal
       headers: {
         'Content-Type': 'application/json',
         Origin: 'https://evil.example',
-        'X-App-Password': PASSWORD,
+        'X-App-Username': 'alex',
+          'X-App-Password': '1234',
       },
       body: JSON.stringify({ status: 'Purchased' }),
     }),
@@ -294,7 +454,8 @@ workerTest('the extension app-password header creates requests without a cookie'
       headers: {
         'Content-Type': 'application/json',
         Origin: 'chrome-extension://abc',
-        'X-App-Password': PASSWORD,
+        'X-App-Username': 'alex',
+          'X-App-Password': '1234',
       },
       body: JSON.stringify({
         title: 'Running shoes',
@@ -316,7 +477,7 @@ workerTest('the extension app-password header creates requests without a cookie'
 
   const listedForExtension = await worker.fetch(
     new Request(`${WORKER_URL}/api/requests`, {
-      headers: { 'X-App-Password': PASSWORD },
+      headers: extensionHeaders(),
     }),
     env
   );
@@ -328,7 +489,7 @@ workerTest('the extension app-password header creates requests without a cookie'
 
   for (const headers of [
     { 'Content-Type': 'application/json', Origin: 'chrome-extension://abc' },
-    { 'Content-Type': 'application/json', Origin: 'chrome-extension://abc', 'X-App-Password': 'wrong' },
+    { 'Content-Type': 'application/json', Origin: 'chrome-extension://abc', 'X-App-Username': 'alex', 'X-App-Password': 'wrong' },
   ]) {
     const rejected = await worker.fetch(
       new Request(`${WORKER_URL}/api/requests`, {
@@ -350,7 +511,8 @@ workerTest('the extension app-password header creates requests without a cookie'
       headers: {
         'Content-Type': 'application/json',
         Origin: 'chrome-extension://abc',
-        'X-App-Password': PASSWORD,
+        'X-App-Username': 'alex',
+          'X-App-Password': '1234',
       },
       body: JSON.stringify({ title: '', url: 'javascript:alert(1)' }),
     }),
@@ -360,7 +522,7 @@ workerTest('the extension app-password header creates requests without a cookie'
   assert.ok((await readJson(invalid)).details.title);
 });
 
-workerTest('missing APP_PASSWORD refuses login without revealing config', async () => {
+workerTest('missing SESSION_SECRET refuses login without revealing config', async () => {
   const worker = (await loadWorker()).default;
   const response = await worker.fetch(login(), { DB: createFakeD1() });
   assert.equal(response.status, 503);
@@ -519,7 +681,7 @@ workerTest('DELETE /api/requests/:id needs the session cookie, not the app passw
   const headerOnly = await worker.fetch(
     new Request(`${WORKER_URL}/api/requests/some-id`, {
       method: 'DELETE',
-      headers: { 'X-App-Password': PASSWORD },
+      headers: extensionHeaders(),
     }),
     env
   );
@@ -529,7 +691,7 @@ workerTest('DELETE /api/requests/:id needs the session cookie, not the app passw
   // Cross-origin DELETE is rejected like PATCH, even with the header.
   for (const headers of [
     { Origin: 'https://evil.example' },
-    { Origin: 'https://evil.example', 'X-App-Password': PASSWORD },
+    { Origin: 'https://evil.example', ...extensionHeaders() },
   ]) {
     const crossOrigin = await worker.fetch(
       new Request(`${WORKER_URL}/api/requests/some-id`, { method: 'DELETE', headers }),
@@ -618,7 +780,8 @@ workerTest('a create with an app password notifies ntfy once and still returns 2
         headers: {
           'Content-Type': 'application/json',
           Origin: 'chrome-extension://abc',
-          'X-App-Password': PASSWORD,
+          'X-App-Username': 'alex',
+          'X-App-Password': '1234',
         },
         body: JSON.stringify({
           title: 'Running shoes',
@@ -666,7 +829,8 @@ workerTest('a create also notifies Discord when the webhook is configured', asyn
         headers: {
           'Content-Type': 'application/json',
           Origin: 'chrome-extension://abc',
-          'X-App-Password': PASSWORD,
+          'X-App-Username': 'alex',
+          'X-App-Password': '1234',
         },
         body: JSON.stringify({
           title: 'Running shoes',
@@ -704,7 +868,8 @@ workerTest('a Discord failure never changes the 201 response', async () => {
           headers: {
             'Content-Type': 'application/json',
             Origin: 'chrome-extension://abc',
-            'X-App-Password': PASSWORD,
+            'X-App-Username': 'alex',
+          'X-App-Password': '1234',
           },
           body: JSON.stringify({ title: 'Shoes', url: 'https://example.com/shoes' }),
         }),
@@ -758,7 +923,7 @@ workerTest('creating without NTFY_TOPIC sends nothing and still returns 201', as
     worker.fetch(
       new Request(`${WORKER_URL}/api/requests`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-App-Password': PASSWORD },
+        headers: { 'Content-Type': 'application/json', ...extensionHeaders() },
         body: JSON.stringify({ title: 'No topic', url: 'https://example.com/none' }),
       }),
       env
@@ -788,7 +953,7 @@ workerTest('an ntfy 500 or network error never changes the 201 response', async 
         worker.fetch(
           new Request(`${WORKER_URL}/api/requests`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-App-Password': PASSWORD },
+            headers: { 'Content-Type': 'application/json', ...extensionHeaders() },
             body: JSON.stringify({ title: 'Fail softly', url: 'https://example.com/soft' }),
           }),
           env
@@ -817,7 +982,7 @@ workerTest('a non-https NTFY_SERVER skips the notification and still returns 201
       worker.fetch(
         new Request(`${WORKER_URL}/api/requests`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-App-Password': PASSWORD },
+          headers: { 'Content-Type': 'application/json', ...extensionHeaders() },
           body: JSON.stringify({ title: 'Insecure server', url: 'https://example.com/http' }),
         }),
         env

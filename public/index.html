@@ -27,9 +27,19 @@
 
     <section id="login-view" class="login-card" hidden>
       <h2>Log in</h2>
-      <p class="muted">Enter the app password to view and change shopping requests.</p>
+      <p class="muted">Log in to view the shopping list.</p>
       <form id="login-form" novalidate>
-        <label for="password">App password</label>
+        <label for="username">Username</label>
+        <input
+          id="username"
+          name="username"
+          type="text"
+          autocomplete="username"
+          autocapitalize="none"
+          spellcheck="false"
+          required
+        />
+        <label for="password">Password</label>
         <input
           id="password"
           name="password"

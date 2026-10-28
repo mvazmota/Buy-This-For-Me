@@ -38,6 +38,7 @@ const loginForm = document.getElementById('login-form');
 const loginErrorEl = document.getElementById('login-error');
 const loginSubmit = document.getElementById('login-submit');
 const passwordInput = document.getElementById('password');
+const usernameInput = document.getElementById('username');
 const deleteDialog = document.getElementById('delete-dialog');
 const deleteDialogItem = document.getElementById('delete-dialog-item');
 const deleteConfirmButton = document.getElementById('delete-confirm');
@@ -45,6 +46,8 @@ const deleteCancelButton = document.getElementById('delete-cancel');
 
 let refreshTimer = null;
 let authRequired = true;
+// 'admin' unlocks edit and delete. Members only add and read.
+let currentRole = 'user';
 let allRequests = [];
 let lastPayload = '';
 let listState = readStoredState();
@@ -336,8 +339,17 @@ async function handleLogin(event) {
   setLoginError('');
   hideBanner();
 
-  if (!passwordInput.value) {
-    setLoginError('Enter the app password.');
+  const username = usernameInput.value.trim();
+  const password = passwordInput.value;
+
+  if (!username) {
+    setLoginError('Enter your username.');
+    usernameInput.focus();
+    return;
+  }
+
+  if (!password) {
+    setLoginError('Enter your password.');
     passwordInput.focus();
     return;
   }
@@ -349,15 +361,15 @@ async function handleLogin(event) {
     const response = await fetch('/api/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: passwordInput.value }),
+      body: JSON.stringify({ username, password }),
     });
     const data = await response.json().catch(() => ({}));
 
     if (!response.ok) {
       if (response.status === 503) {
-        setLoginError('Login is not available on this server. Check that APP_PASSWORD is configured.');
+        setLoginError('Login is not available on this server. Check the server configuration.');
       } else {
-        setLoginError('Login failed. Check the password and try again.');
+        setLoginError('Login failed. Check your username and password.');
       }
       passwordInput.select();
       return;
@@ -365,6 +377,7 @@ async function handleLogin(event) {
 
     passwordInput.value = '';
     authRequired = data.authRequired !== false;
+    currentRole = data.role === 'admin' ? 'admin' : 'user';
     showApp();
     await loadRequests();
   } catch {
@@ -600,6 +613,20 @@ function buildCard(request) {
   qty.className = 'qty';
   qty.textContent = `Qty ${request.quantity}`;
   side.appendChild(qty);
+
+  // Members can read the list but not change it: show the status as text and
+  // skip the select, edit form and delete button entirely.
+  if (currentRole !== 'admin') {
+    const badge = document.createElement('span');
+    badge.className = 'status-badge';
+    badge.dataset.status = request.status;
+    badge.textContent = request.status;
+    side.appendChild(badge);
+
+    card.appendChild(main);
+    card.appendChild(side);
+    return card;
+  }
 
   const select = document.createElement('select');
   select.className = 'status-select';
@@ -870,6 +897,7 @@ async function checkSession() {
     }
 
     authRequired = data.authRequired !== false;
+    currentRole = data.role === 'admin' ? 'admin' : 'user';
 
     if (!data.authenticated) {
       showLogin();

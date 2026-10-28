@@ -45,6 +45,7 @@ function createElement() {
  */
 function loadPopup({
   backendUrl = REMOTE_URL,
+  appUsername = 'alex',
   appPassword = 'family secret',
   fetchImpl,
   scriptingPrice = null,
@@ -66,6 +67,7 @@ function loadPopup({
   const injected = [];
   const stored = {};
   if (backendUrl !== null) stored.backendUrl = backendUrl;
+  if (appUsername !== null) stored.appUsername = appUsername;
   if (appPassword !== null) stored.appPassword = appPassword;
 
   const chrome = {
@@ -186,6 +188,7 @@ test('remote submissions post directly to the Worker with the saved app password
   assert.equal(calls[0].url, `${REMOTE_URL}/api/requests`);
   assert.equal(calls[0].options.method, 'POST');
   assert.equal(calls[0].options.headers['Content-Type'], 'application/json');
+  assert.equal(calls[0].options.headers['X-App-Username'], 'alex');
   assert.equal(calls[0].options.headers['X-App-Password'], 'family secret');
   assert.deepEqual(JSON.parse(calls[0].options.body), payload);
 
@@ -219,7 +222,7 @@ test('a rejected remote password points at the extension settings', async () => 
   assert.equal(createdTabs.length, 0);
   assert.equal(
     elements.get('status').textContent,
-    'Password is missing or wrong. Update it in Settings.'
+    'Username or password is wrong. Update it in Settings.'
   );
 });
 
@@ -363,6 +366,7 @@ test('popup warns about a duplicate and sends nothing until confirmed', async ()
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, `${REMOTE_URL}/api/requests`);
   assert.equal(calls[0].options.method, undefined);
+  assert.equal(calls[0].options.headers['X-App-Username'], 'alex');
   assert.equal(calls[0].options.headers['X-App-Password'], 'family secret');
 
   const warning = context.elements.get('duplicate-warning');

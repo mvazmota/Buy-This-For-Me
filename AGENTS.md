@@ -7,7 +7,8 @@ Development runs on a local Node server with JSON storage; production runs on a 
 Worker with D1. No front-end build step.
 
 - Local mode: `server.js` + `lib/`, no auth, loopback only, data in `data/requests.json`.
-- Online mode: Worker + D1 + static dashboard, protected by the `APP_PASSWORD` secret.
+- Online mode: Worker + D1 + static dashboard, with accounts in the `users` table and a
+  `SESSION_SECRET`-signed login cookie. Roles: `admin` edits and deletes, `user` adds and reads.
 
 ## Layout
 
@@ -51,9 +52,11 @@ npx wrangler deploy
 
 ## Security Requirements
 
-- `APP_PASSWORD` is the Cloudflare Worker secret and the app password saved in the extension
-  settings. Never commit, print, expose, or ask the user to paste the secret value. Do not place
-  it in `wrangler.jsonc`, `.dev.vars`, build commands, source, or tests.
+- `SESSION_SECRET` signs the login cookie. It is a Cloudflare Worker secret: never commit,
+  print, expose, or ask the user to paste it. Do not place it in `wrangler.jsonc`, `.dev.vars`,
+  build commands, source, or tests. Rotating it logs every account out.
+- Accounts live in the D1 `users` table as PBKDF2 hashes. Never store or log a plain password.
+  Roles: `admin` may add, view, edit and delete; `user` may add and view only.
 - `NTFY_TOPIC` is a Worker secret and the ntfy topic acts as a password: never commit, log, or
   return it. `NTFY_TOKEN` is also a Worker secret: it is only sent as a Bearer header and is
   never committed, logged, or returned. Notification failures are logged without either value;
@@ -61,11 +64,12 @@ npx wrangler deploy
 - `DISCORD_WEBHOOK_URL` is a Worker secret and anyone holding it can post into that channel:
   never commit, log, return it, or paste it in chat. Only Discord hosts on an `https` URL are
   accepted. See README section 7.7.
-- The extension stores the app password locally in `chrome.storage.local` (key `appPassword`).
-  This is a deliberate, family-only accepted risk. The value must never be committed or
-  hardcoded, and it is used only for `GET` and `POST /api/requests` from the extension via the
-  `X-App-Password` header (GET supports the duplicate warning). Do not send it to any other
-  endpoint; PATCH still requires the session cookie.
+- The extension stores a username and password locally in `chrome.storage.local` (keys
+  `appUsername`, `appPassword`). This is a deliberate, family-only accepted risk. The values
+  must never be committed or hardcoded. They are used only for `GET` and `POST /api/requests`
+  from the extension, via the `X-App-Username` and `X-App-Password` headers (GET supports the
+  duplicate warning). Do not send them to any other endpoint; PATCH and DELETE always require
+  the session cookie and an admin role.
 - The local server has no authentication. Bind it only to loopback. Never tunnel,
   port-forward, reverse-proxy, or bind it to `0.0.0.0`.
 - Do not commit `data/`, `.dev.vars`, secrets, or build output. Preserve `.gitignore`.
