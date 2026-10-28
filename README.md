@@ -407,7 +407,32 @@ cloudflared on a Raspberry Pi with no published ports, and
 setting `NTFY_SERVER` to your `https://` URL (`npx wrangler secret put NTFY_SERVER`, or a plain
 variable); `NTFY_TOPIC` and `NTFY_TOKEN` keep working unchanged.
 
-### 7.7 Connect Cloudflare Workers Builds to GitHub
+### 7.7 Discord notifications
+
+A Discord webhook is the second channel, and the simplest one that is not affected by
+`ntfy.sh` rate limits.
+
+1. In Discord: **Server Settings → Integrations → Webhooks → New Webhook**, pick a channel,
+   then **Copy Webhook URL**.
+2. Store it as a Worker secret and paste the URL only at the prompt:
+   ```powershell
+   npx wrangler secret put DISCORD_WEBHOOK_URL
+   ```
+3. Add a request and check the channel.
+
+- Every new request posts one embed: the item title linked to the product page, the notes as
+  the description, and `Quantity`, `Price` (`12,99 €`) and `Dashboard` fields. The embed
+  timestamp is the request time.
+- Both channels can run at once. Set both secrets to get both; set neither and the Worker just
+  skips notifications.
+- Like ntfy, the send runs after the response and can never fail the API call. A `429` or a
+  Discord outage is logged without the webhook URL.
+- Only `https://discord.com`, `discordapp.com`, `ptb.discord.com` and `canary.discord.com`
+  webhook paths are accepted, so a mistyped secret cannot post elsewhere.
+- **The webhook URL is a secret.** Anyone holding it can post into that channel. Do not paste
+  it in chat or commit it.
+
+### 7.8 Connect Cloudflare Workers Builds to GitHub
 
 The repository for this project is `mvazmota/Buy-This-For-Me`, production branch `main`.
 
@@ -446,7 +471,7 @@ From then on every push to `main` runs the build and deploy commands, so you no 
 by hand. Builds never applies D1 migrations: run the `--remote` migration from step 7.3
 yourself before pushing code that needs a new one.
 
-### 7.8 Verify the deployment
+### 7.9 Verify the deployment
 
 1. `GET https://buy-this-for-me.m-vaz-mota.workers.dev/api/health` in a browser or with curl
    should return `{"ok":true}`.
@@ -458,7 +483,7 @@ yourself before pushing code that needs a new one.
 5. Log out and confirm the list is no longer shown.
 6. Wrong passwords must show a generic failure, never the configured password.
 
-### 7.9 Point the extension at the Worker
+### 7.10 Point the extension at the Worker
 
 The extension already uses `https://buy-this-for-me.m-vaz-mota.workers.dev` by default, so no
 setting is needed unless you previously saved another URL.

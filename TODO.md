@@ -20,16 +20,17 @@ This file is the living backlog. Move items between sections as work lands.
 `ntfy.sh` is rate-limited per source IP, and Cloudflare Workers share egress IPs, so `429`
 failures are expected. The project needs a notification channel that is not tied to a shared IP.
 
-- [ ] **Discord webhook** — free, per-webhook rate limits (about 5 requests per 2 seconds), no
-      shared-IP issue. Needs `DISCORD_WEBHOOK_URL` as a Worker secret. Simplest to implement.
+- [x] **Discord webhook** — free, per-webhook rate limits (about 5 requests per 2 seconds), no
+      shared-IP issue. Needs `DISCORD_WEBHOOK_URL` as a Worker secret. Implemented, awaiting the
+      secret and a live test.
 - [ ] **Telegram bot** — free, per-bot limits, no shared-IP issue. Needs `TELEGRAM_BOT_TOKEN` and
       `TELEGRAM_CHAT_ID`. User previously said they were not interested in Telegram; keep it
       listed but deprioritised.
 - [ ] **Pushover** — one-time ~$5 per platform, limits per app token. Needs `PUSHOVER_TOKEN` and
       `PUSHOVER_USER`.
 - [ ] **Self-hosted ntfy** — see Blocked above. Free forever, needs the Pi online.
-- [ ] **Make the notifier pluggable** — one `src/notify.js` interface that dispatches to whichever
-      channels are configured, so several can be enabled at once.
+- [x] **Make the notifier pluggable** — one `src/notify.js` interface that dispatches to whichever
+      channels are configured, so several can be enabled at once. Implemented for ntfy + Discord.
 
 ## Backlog
 

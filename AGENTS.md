@@ -58,6 +58,9 @@ npx wrangler deploy
   return it. `NTFY_TOKEN` is also a Worker secret: it is only sent as a Bearer header and is
   never committed, logged, or returned. Notification failures are logged without either value;
   see README section 7.6.
+- `DISCORD_WEBHOOK_URL` is a Worker secret and anyone holding it can post into that channel:
+  never commit, log, return it, or paste it in chat. Only Discord hosts on an `https` URL are
+  accepted. See README section 7.7.
 - The extension stores the app password locally in `chrome.storage.local` (key `appPassword`).
   This is a deliberate, family-only accepted risk. The value must never be committed or
   hardcoded, and it is used only for `GET` and `POST /api/requests` from the extension via the

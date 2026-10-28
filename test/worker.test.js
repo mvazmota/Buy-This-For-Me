@@ -648,6 +648,73 @@ workerTest('a create with an app password notifies ntfy once and still returns 2
   );
 });
 
+workerTest('a create also notifies Discord when the webhook is configured', async () => {
+  const worker = (await loadWorker()).default;
+  const webhook = 'https://discord.com/api/webhooks/123456789/abcdef-token';
+  const env = envWithDb({ DISCORD_WEBHOOK_URL: webhook });
+  const calls = [];
+
+  const fetchImpl = async (url, options) => {
+    calls.push({ url: String(url), options });
+    return { ok: true, status: 204 };
+  };
+
+  const response = await withFakeFetch(fetchImpl, () =>
+    worker.fetch(
+      new Request(`${WORKER_URL}/api/requests`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Origin: 'chrome-extension://abc',
+          'X-App-Password': PASSWORD,
+        },
+        body: JSON.stringify({
+          title: 'Running shoes',
+          url: 'https://example.com/shoes',
+          quantity: 2,
+          price: 12.99,
+        }),
+      }),
+      env
+    )
+  );
+
+  assert.equal(response.status, 201);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, webhook);
+
+  const payload = JSON.parse(calls[0].options.body);
+  assert.equal(payload.embeds.length, 1);
+  assert.equal(payload.embeds[0].title, 'Running shoes');
+  assert.equal(payload.embeds[0].url, 'https://example.com/shoes');
+});
+
+workerTest('a Discord failure never changes the 201 response', async () => {
+  const worker = (await loadWorker()).default;
+  const env = envWithDb({
+    DISCORD_WEBHOOK_URL: 'https://discord.com/api/webhooks/1/token',
+  });
+
+  const response = await withFakeFetch(
+    async () => ({ ok: false, status: 429 }),
+    () =>
+      worker.fetch(
+        new Request(`${WORKER_URL}/api/requests`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Origin: 'chrome-extension://abc',
+            'X-App-Password': PASSWORD,
+          },
+          body: JSON.stringify({ title: 'Shoes', url: 'https://example.com/shoes' }),
+        }),
+        env
+      )
+  );
+
+  assert.equal(response.status, 201);
+});
+
 workerTest('a cookie-authenticated create defers the notification to ctx.waitUntil', async () => {
   const worker = (await loadWorker()).default;
   const topic = 'bifm-test-topic-cookie';

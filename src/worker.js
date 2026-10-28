@@ -3,7 +3,7 @@
 // and store requests in D1. Everything else is served from the ASSETS binding.
 
 import validateModule from '../lib/validate.js';
-import { buildNtfyMessage, sendNtfyNotification } from './notify.js';
+import { notifyNewRequest } from './notify.js';
 import {
   COOKIE_NAME,
   clearSessionCookie,
@@ -208,15 +208,18 @@ async function isExtensionAuthorized(request, env) {
 }
 
 /**
- * Fire an ntfy notification for a newly created request. The API response never
- * depends on it: with a Worker ctx the send runs after the response, and the
- * sender itself swallows every error.
+ * Fire notifications for a newly created request. The API response never
+ * depends on them: with a Worker ctx the send runs after the response, and the
+ * notifier itself swallows every error.
  */
-async function notifyNewRequest(env, created, origin, ctx) {
+async function notifyCreated(env, created, origin, ctx) {
   try {
-    if (!env || typeof env.NTFY_TOPIC !== 'string' || env.NTFY_TOPIC.trim() === '') return;
-    const message = buildNtfyMessage(created, origin);
-    const task = sendNtfyNotification(env, message);
+    const hasNtfy = typeof env.NTFY_TOPIC === 'string' && env.NTFY_TOPIC.trim() !== '';
+    const hasDiscord =
+      typeof env.DISCORD_WEBHOOK_URL === 'string' && env.DISCORD_WEBHOOK_URL.trim() !== '';
+    if (!hasNtfy && !hasDiscord) return;
+
+    const task = notifyNewRequest(env, created, origin);
     if (ctx && typeof ctx.waitUntil === 'function') {
       ctx.waitUntil(task);
       return;
@@ -243,7 +246,7 @@ async function handleRequests(request, env, url, extensionAuthorized = false, ct
         return json({ error: 'Please fix the highlighted fields.', details: result.errors }, 400);
       }
       const created = await createRequest(env, result.value);
-      await notifyNewRequest(env, created, url.origin, ctx);
+      await notifyCreated(env, created, url.origin, ctx);
       return json({ request: created }, 201);
     }
     return json({ error: 'Method not allowed. Use GET or POST.' }, 405);
