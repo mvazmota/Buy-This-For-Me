@@ -6,11 +6,11 @@ const test = require('node:test');
 const WORKER_URL = 'https://buy-this-for-me.example.workers.dev';
 const PASSWORD = 'correct horse battery staple';
 const SESSION_SECRET = 'test-session-secret-9f3a';
-// Precomputed PBKDF2 hashes so the fake D1 has accounts without an async setup.
+// Precomputed salted SHA-256 hashes so the fake D1 has accounts without an async setup.
 const ADMIN_PASSWORD_HASH =
-  'pbkdf2$120000$ljs4H7WiX1-l1EjsgyQllw$s_yC-877_DOWRZ6qmqgilU53xYII3bIPWKMgD3CyFE4';
+  'sha256$1$SRpZUvw94oNzc7COfmIhGA$_fgcbAay0z7mLYAuZ_IYjGoyl4eSJ9mEYtxIBT0VxoY';
 const MEMBER_PASSWORD_HASH =
-  'pbkdf2$120000$LcBvyujJAhwhnEmIstwcUQ$PFGN_bTkE0bBz6B7oHweroa-WNODid35nKSquBiuN8Y';
+  'sha256$1$fQ9D6yZxAvNdyJGnk7fcGA$h0xJoapA1ZJtO7-cXQg94wFQA9FM5kpUenPirFdB9lc';
 
 // Node 18 does not expose global WebCrypto by default; the Worker tests need it.
 const hasWebCrypto = Boolean(globalThis.crypto && globalThis.crypto.subtle);

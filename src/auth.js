@@ -1,14 +1,19 @@
 // Password hashing for the Worker and the seed script.
-// PBKDF2-SHA256 with a random per-user salt, stored as one string:
-//   pbkdf2$<iterations>$<salt base64url>$<key base64url>
-// Nothing here logs a password.
+//
+// Cloudflare Workers' WebCrypto rejects PBKDF2 with NotSupportedError, so this
+// uses salted SHA-256: one digest over (salt || password). It is fast enough
+// for the Workers CPU budget and never stores a plain password, but it is not a
+// slow KDF. Treat it as "good enough for a two-person family tool": use real
+// passwords, and never reuse an important one here.
+//
+// Stored format: sha256$1$<salt base64url>$<digest base64url>
 
-const PBKDF2_ITERATIONS = 120000;
 const SALT_BYTES = 16;
-const KEY_BYTES = 32;
+const DIGEST_BYTES = 32;
 const encoder = new TextEncoder();
 
 export const ROLES = ['admin', 'user'];
+export const HASH_SCHEME = 'sha256';
 
 // 3-32 chars, lowercase letters, digits, dot, underscore, dash.
 const USERNAME_PATTERN = /^[a-z0-9][a-z0-9._-]{2,31}$/;
@@ -42,16 +47,12 @@ export function isValidUsername(value) {
   return typeof value === 'string' && USERNAME_PATTERN.test(value);
 }
 
-function derive(password, salt, iterations) {
-  return crypto.subtle
-    .importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits'])
-    .then((baseKey) =>
-      crypto.subtle.deriveBits(
-        { name: 'PBKDF2', hash: 'SHA-256', salt, iterations },
-        baseKey,
-        KEY_BYTES * 8
-      )
-    );
+async function digest(saltBytes, password) {
+  const passwordBytes = encoder.encode(password);
+  const input = new Uint8Array(saltBytes.length + passwordBytes.length);
+  input.set(saltBytes, 0);
+  input.set(passwordBytes, saltBytes.length);
+  return new Uint8Array(await crypto.subtle.digest('SHA-256', input));
 }
 
 /** Hash a password for storage. The salt is random for every call. */
@@ -60,8 +61,8 @@ export async function hashPassword(password) {
     throw new Error('Password must be at least 4 characters.');
   }
   const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES));
-  const bits = await derive(password, salt, PBKDF2_ITERATIONS);
-  return `pbkdf2$${PBKDF2_ITERATIONS}$${toBase64Url(salt)}$${toBase64Url(new Uint8Array(bits))}`;
+  const hash = await digest(salt, password);
+  return `${HASH_SCHEME}$1$${toBase64Url(salt)}$${toBase64Url(hash)}`;
 }
 
 function constantTimeEqual(left, right) {
@@ -80,24 +81,25 @@ export async function verifyPassword(password, stored) {
     if (typeof stored !== 'string') return false;
 
     const parts = stored.split('$');
-    if (parts.length !== 4 || parts[0] !== 'pbkdf2') return false;
-
-    const iterations = Number(parts[1]);
-    if (!Number.isInteger(iterations) || iterations < 1000 || iterations > 1000000) return false;
+    if (parts.length !== 4 || parts[0] !== HASH_SCHEME) {
+      console.error('password check failed: unrecognised hash format.');
+      return false;
+    }
 
     const salt = fromBase64Url(parts[2]);
     const expected = fromBase64Url(parts[3]);
-    if (!salt || !expected || expected.length !== KEY_BYTES) return false;
+    if (!salt || !expected || expected.length !== DIGEST_BYTES) return false;
 
-    const bits = await derive(password, salt, iterations);
-    return constantTimeEqual(new Uint8Array(bits), expected);
-  } catch {
+    const actual = await digest(salt, password);
+    return constantTimeEqual(actual, expected);
+  } catch (err) {
+    console.error('password check failed:', err && err.name ? err.name : 'unknown error');
     return false;
   }
 }
 
 /**
- * Look up an account by username. Returns { username, role } or null.
+ * Look up an account by username. Returns { username, role, passwordHash } or null.
  * Needs the D1 `users` table; any query error is a miss, never a 500 leak.
  */
 export async function findUser(env, username) {
@@ -123,8 +125,8 @@ export async function findUser(env, username) {
 export async function authenticate(env, username, password) {
   const user = await findUser(env, username);
   if (!user) {
-    // Still run a hash so a missing user takes about as long as a wrong password.
-    await verifyPassword(password, `pbkdf2$${PBKDF2_ITERATIONS}$${toBase64Url(new Uint8Array(SALT_BYTES))}$${toBase64Url(new Uint8Array(KEY_BYTES))}`);
+    // Spend roughly the same time as a real check so a missing user is not obvious.
+    await digest(new Uint8Array(SALT_BYTES), password);
     return null;
   }
   const ok = await verifyPassword(password, user.passwordHash);
