@@ -33,8 +33,6 @@ failures are expected. The project needs a notification channel that is not tied
 
 ## Backlog
 
-- [ ] Safari path for the user's dad: a bookmarklet that sends the current page to the dashboard,
-      since he uses Safari on a Mac and the extension is Edge/Chrome only.
 - [ ] Publish the extension to the Edge Add-ons store so the dad can install it without developer
       mode.
 - [ ] Dashboard: archive or paginate old requests once the list grows past a screen or two.
