@@ -1,13 +1,12 @@
 # Self-hosted ntfy on a Raspberry Pi 5.
 #
-# ntfy is published on 127.0.0.1 only: cloudflared runs on the host (as a
-# systemd service) and reaches it there. Nothing is exposed on the LAN.
+# ntfy is published on 127.0.0.1 only. cloudflared runs on the HOST as a systemd
+# service, so it can reach this port and any other service you add later.
+# Nothing is exposed on the LAN.
 #
-# The Cloudflare Tunnel is created with the cloudflared CLI, not the Zero Trust
-# dashboard, so this setup needs no Zero Trust plan:
-#   cloudflared tunnel login
-#   cloudflared tunnel create ntfy
-#   cloudflared tunnel route dns ntfy ntfy.yourdomain.com
+# Create the tunnel in the Cloudflare dashboard (Zero Trust → Networks →
+# Tunnels), add a public hostname pointing at http://127.0.0.1:2586, then run:
+#   sudo cloudflared service install <TOKEN>
 # See README.md for the full runbook.
 
 services:
@@ -25,5 +24,5 @@ services:
       # See README: sudo chown -R 1000:1000 data
       - ./data:/var/lib/ntfy
     ports:
-      # Loopback only. cloudflared lives on the host and connects here.
+      # Loopback only. cloudflared on the host connects here.
       - "127.0.0.1:2586:80"

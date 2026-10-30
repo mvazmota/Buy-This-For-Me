@@ -1,8 +1,8 @@
 # Self-hosted ntfy on a Raspberry Pi 5
 
 Run your own ntfy instead of `ntfy.sh`, reachable at `https://ntfy.yourdomain.com`
-through a Cloudflare Tunnel. The tunnel is created with the `cloudflared` CLI, so it needs
-**no Zero Trust plan and no card**.
+through a Cloudflare Tunnel. One tunnel serves ntfy now and any other service you add to the
+Pi later.
 
 ntfy runs in Docker and is published on `127.0.0.1:2586` only. `cloudflared` runs on the host
 as a systemd service and forwards `https://ntfy.yourdomain.com` to that address. Nothing is
@@ -46,27 +46,36 @@ sudo usermod -aG docker $USER
 
 Log out and back in, then check `docker --version`.
 
-## 4. Install cloudflared and create the tunnel
+## 4. Create the tunnel and run cloudflared
 
-```bash
-curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64.deb -o /tmp/cloudflared.deb
-sudo dpkg -i /tmp/cloudflared.deb
-cloudflared --version
-```
+1. **Activate Zero Trust** (free plan, up to 50 users). Cloudflare may ask for a card to verify
+   the account; there is no charge on the free plan.
+2. Zero Trust → Networks → Tunnels → **Create a tunnel** → **Cloudflared** → name it `ntfy`.
+3. Copy the **token** shown on the install page. It is a secret.
+4. Add a **public hostname**:
+   - Subdomain: `ntfy`
+   - Domain: your domain
+   - Service: `HTTP`
+   - URL: `127.0.0.1:2586`
 
-1. Authorise the CLI. It prints a URL:
+   Adding this hostname creates the DNS record. Do not add a CNAME by hand.
+5. Install cloudflared on the Pi and register the service with the token:
    ```bash
-   cloudflared tunnel login
+   curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64.deb -o /tmp/cloudflared.deb
+   sudo dpkg -i /tmp/cloudflared.deb
+   sudo cloudflared service install <TOKEN>
+   sudo systemctl status cloudflared --no-pager
    ```
-   Open that URL on your computer, log in, and pick your domain. It writes
-   `~/.cloudflared/cert.pem` on the Pi.
-2. Create the tunnel and its DNS record:
-   ```bash
-   cloudflared tunnel create ntfy
-   cloudflared tunnel route dns ntfy ntfy.yourdomain.com
-   ```
-   The create step prints a tunnel UUID and writes `~/.cloudflared/<UUID>.json`. Keep that file
-   private: it is the tunnel's credential.
+
+The service reads its config from the token, so there is no `config.yml` to maintain.
+
+**Adding another service later:** bind it to `127.0.0.1:<port>`, then add a public hostname on
+the same tunnel pointing at `127.0.0.1:<port>`. No tunnel changes, no restart.
+
+**Alternative without Zero Trust:** `cloudflared tunnel login`, then
+`cloudflared tunnel create ntfy` and `cloudflared tunnel route dns ntfy ntfy.yourdomain.com`,
+with a `config.yml` under `/etc/cloudflared/`. Same tunnel, managed on the Pi instead of in the
+browser.
 
 ## 5. Start ntfy
 
@@ -77,7 +86,8 @@ cloudflared --version
    cp .env.example .env
    nano .env
    ```
-   Set `NTFY_BASE_URL=https://ntfy.yourdomain.com`. `TUNNEL_TOKEN` is unused with this setup.
+   Set `NTFY_BASE_URL=https://ntfy.yourdomain.com`. `TUNNEL_TOKEN` is unused when cloudflared
+   runs as a host service.
 3. Create the data folder owned by the user ntfy runs as (uid 1000). Without this the cache
    file cannot be written and the container exits:
    ```bash
@@ -95,27 +105,15 @@ cloudflared --version
    ```
    Expected: `{"healthy":true}`.
 
-## 6. Run cloudflared as a service
+## 6. Verify through the tunnel
 
-1. Write `/etc/cloudflared/config.yml`. Replace `<UUID>` and the username:
-   ```yaml
-   tunnel: ntfy
-   credentials-file: /home/YOUR_USER/.cloudflared/<UUID>.json
-   ingress:
-     - hostname: ntfy.yourdomain.com
-       service: http://127.0.0.1:2586
-     - service: http_status:404
-   ```
-2. Install and start the service:
-   ```bash
-   sudo cloudflared service install
-   sudo systemctl enable --now cloudflared
-   sudo systemctl status cloudflared --no-pager
-   ```
-3. Test from your computer:
-   ```bash
-   curl -s https://ntfy.yourdomain.com/v1/health
-   ```
+From your computer:
+
+```bash
+curl -s https://ntfy.yourdomain.com/v1/health
+```
+
+If that returns `{"healthy":true}`, the tunnel and ntfy are both working.
 
 ## 7. Point the project at it
 
@@ -157,6 +155,6 @@ cloudflared --version
 | `ntfy` container exits, or log shows permission denied on `cache.db` | The data folder is not writable by uid 1000. Run `sudo chown -R 1000:1000 data`, then `docker compose up -d`. |
 | Cloudflare returns 502 | cloudflared cannot reach ntfy. Check `curl -s http://127.0.0.1:2586/v1/health` on the Pi, and that `config.yml` points at `127.0.0.1:2586`. |
 | `cloudflared tunnel route dns` fails | The zone is not active yet. Wait for the nameservers to propagate. |
-| `cloudflared` service fails to start | Check `sudo journalctl -u cloudflared -n 50 --no-pager`. Usually a wrong `credentials-file` path. |
+| `cloudflared` service fails to start | Check `sudo journalctl -u cloudflared -n 50 --no-pager`. Usually a stale or wrong token: re-run `sudo cloudflared service install <TOKEN>`. |
 | Notifications arrive late or in bursts | Confirm `NTFY_BEHIND_PROXY=true`, and stop the Pi from sleeping. |
 | Worker log shows `status 401` | A stale `NTFY_TOKEN` is being sent to a server without auth. Run `npx wrangler secret delete NTFY_TOKEN`. |
