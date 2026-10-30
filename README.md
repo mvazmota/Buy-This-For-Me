@@ -422,11 +422,12 @@ price is set, then the product link.
 notifications. Use a long random name, never paste either value in chat, and never commit them.
 
 **Self-hosted option.** If you would rather not depend on `ntfy.sh`, you can run ntfy on your
-own hardware behind a Cloudflare Tunnel. `selfhost/docker-compose.yml` starts ntfy and
-cloudflared on a Raspberry Pi with no published ports, and
-[selfhost/README.md](selfhost/README.md) is the full Pi 5 runbook. Point the Worker at it by
-setting `NTFY_SERVER` to your `https://` URL (`npx wrangler secret put NTFY_SERVER`, or a plain
-variable); `NTFY_TOPIC` and `NTFY_TOKEN` keep working unchanged.
+own hardware behind a Cloudflare Tunnel. `selfhost/docker-compose.yml` runs ntfy on a Raspberry
+Pi, published on loopback only, with `cloudflared` running as a host service (CLI-managed
+tunnel, so no Zero Trust plan or card is needed). [selfhost/README.md](selfhost/README.md) is
+the full Pi 5 runbook. Point the Worker at it by setting `NTFY_SERVER` to your `https://` URL
+(`npx wrangler secret put NTFY_SERVER`, or a plain variable); `NTFY_TOPIC` keeps working. A
+self-hosted instance usually runs without auth, so delete `NTFY_TOKEN`.
 
 ### 7.7 Discord notifications
 
