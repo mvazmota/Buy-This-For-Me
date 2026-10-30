@@ -127,11 +127,40 @@ If that returns `{"healthy":true}`, the tunnel and ntfy are both working.
    node -e "console.log(require('crypto').randomBytes(16).toString('base64url'))"
    npx wrangler secret put NTFY_TOPIC
    ```
-3. Delete the old ntfy.sh access token, which this instance does not use:
+3. Give the Worker an access token (see the auth section below):
    ```powershell
-   npx wrangler secret delete NTFY_TOKEN
+   npx wrangler secret put NTFY_TOKEN
    ```
 4. Send a test request from the extension and confirm the notification arrives.
+
+## 7b. Require authentication
+
+The compose file already sets `NTFY_AUTH_FILE` and `NTFY_AUTH_DEFAULT_ACCESS: deny-all`, so
+anonymous publishing and reading are refused and the URL alone is useless.
+
+1. Apply the settings:
+   ```bash
+   cd ~/selfhost
+   docker compose up -d
+   ```
+2. Create an account. It prompts for a password twice:
+   ```bash
+   docker compose exec ntfy ntfy user add --role=admin martin
+   ```
+   `--role=admin` can read and write every topic; no per-topic ACL is needed for one person.
+3. Create a token for the Worker and copy the `tk_...` value it prints:
+   ```bash
+   docker compose exec ntfy ntfy token add martin
+   ```
+4. Store that token on the Worker:
+   ```powershell
+   npx wrangler secret put NTFY_TOKEN
+   ```
+5. In the phone app, open the server `https://ntfy.yourdomain.com` and add the same username and
+   password. Without it the app gets `401` and shows nothing.
+
+Verify: `curl -s https://ntfy.yourdomain.com/v1/health` still answers (health is public), but
+publishing without a token now returns `401`.
 
 ## 8. Phone app
 
@@ -157,4 +186,4 @@ If that returns `{"healthy":true}`, the tunnel and ntfy are both working.
 | `cloudflared tunnel route dns` fails | The zone is not active yet. Wait for the nameservers to propagate. |
 | `cloudflared` service fails to start | Check `sudo journalctl -u cloudflared -n 50 --no-pager`. Usually a stale or wrong token: re-run `sudo cloudflared service install <TOKEN>`. |
 | Notifications arrive late or in bursts | Confirm `NTFY_BEHIND_PROXY=true`, and stop the Pi from sleeping. |
-| Worker log shows `status 401` | A stale `NTFY_TOKEN` is being sent to a server without auth. Run `npx wrangler secret delete NTFY_TOKEN`. |
+| Worker log shows `status 401` | The instance now requires auth: set `NTFY_TOKEN` with a token from `ntfy token add`, and subscribe in the app with the account credentials. |

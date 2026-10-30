@@ -19,6 +19,10 @@ services:
       NTFY_CACHE_FILE: /var/lib/ntfy/cache.db
       NTFY_BEHIND_PROXY: "true"
       NTFY_LISTEN_HTTP: ":80"
+      # Require credentials for every subscribe and publish. Create the first
+      # account with: docker compose exec ntfy ntfy user add --role=admin <name>
+      NTFY_AUTH_FILE: /var/lib/ntfy/user.db
+      NTFY_AUTH_DEFAULT_ACCESS: deny-all
     volumes:
       # ntfy runs as uid 1000; the host folder must be writable by that user.
       # See README: sudo chown -R 1000:1000 data

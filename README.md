@@ -427,8 +427,8 @@ Pi, published on loopback only, while `cloudflared` runs on the host as a servic
 can serve ntfy and any other home-server service you add later.
 [selfhost/README.md](selfhost/README.md) is the full Pi 5 runbook. Point the Worker at it by
 setting `NTFY_SERVER` to your `https://` URL (`npx wrangler secret put NTFY_SERVER`, or a plain
-variable); `NTFY_TOPIC` keeps working. A self-hosted instance usually runs without auth, so
-delete `NTFY_TOKEN`.
+variable); `NTFY_TOPIC` keeps working, and `NTFY_TOKEN` must hold an access token from the
+self-hosted instance once auth is enabled (see section 7b of the runbook).
 
 ### 7.7 Discord notifications
 
